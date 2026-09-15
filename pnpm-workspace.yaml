@@ -1,0 +1,26 @@
+packages:
+  - packages/*
+  - apps/*
+
+# Confirmed necessary the hard way by a prior project on the same npm-based
+# dsh approach (example-2/fox-harness-core, docs/code-rules.md there):
+# pnpm's default strict/symlinked node_modules hides transitive deps (e.g.
+# @deepseek-ai/dsh-llm, a dep of dsh-base) from the Cordis plugin loader's
+# dynamic import() at real boot. --dump-config works either way (it never
+# imports anything), but a real `dsh --profile <name>` boot fails with
+# "Cannot find package '@deepseek-ai/dsh-llm'" without this. dsh's own
+# auto-generated per-profile pnpm-workspace.yaml (~/.dsh/profiles/<name>/)
+# uses the same setting.
+nodeLinker: hoisted
+
+# pnpm 10+ blocks any dependency's install/build script until reviewed here.
+allowBuilds:
+  # First-party dsh package (subprocess spawning) — needed for real.
+  '@deepseek-ai/dsh-subprocess-local': true
+  # Native PTY backend — only if a terminal-persistent tool ends up in the
+  # bundle; deny until something at runtime actually needs it.
+  node-pty: false
+  # Native/optional, not needed by this bundle's row set.
+  '@google/genai': false
+  koffi: false
+  protobufjs: false

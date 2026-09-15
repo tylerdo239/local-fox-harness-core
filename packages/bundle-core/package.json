@@ -1,0 +1,26 @@
+{
+  "name": "@cordis-app/bundle-core",
+  "description": "Cordis Agent Core product bundle: disables the shipped dsh Web React client roster and mounts our own plugins (ui, gateway).",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./ui": "./lib/ui.js",
+    "./gateway": "./lib/gateway.js",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
+  "comment_dependencies": "Deliberately none here — pnpm's hoisted linker (pnpm-workspace.yaml) creates a REAL, separate node_modules copy for any dependency declared directly on a workspace package, which produced a TypeScript duplicate-identity error (two different @deepseek-ai/dsh-session paths, one per copy) for the exact same version. Every @deepseek-ai/dsh-* package this bundle imports is declared once, at the root package.json, and resolved here via plain Node upward directory-walk resolution through the single hoisted root node_modules.",
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "4.0.2"
+  }
+}

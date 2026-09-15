@@ -1,0 +1,8 @@
+node_modules/
+lib/
+!apps/web/lib/
+!apps/web/lib/**
+.next/
+out/
+*.tsbuildinfo
+/data/

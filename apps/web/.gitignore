@@ -1,0 +1,11 @@
+.next/
+out/
+next-env.d.ts
+*.tsbuildinfo
+
+# Root .gitignore has a repo-wide `lib/` rule (upstream packages build their
+# TypeScript sources into lib/, real build output there). Our own lib/ here
+# is hand-written Next.js source (API client, store, hooks), not build
+# output — un-ignore it.
+!lib/
+!lib/**

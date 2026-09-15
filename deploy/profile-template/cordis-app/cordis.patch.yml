@@ -1,0 +1,13 @@
+# Live profile-tier patch — the "Home" tier from
+# docs/cordis-agent-implementation-plan.md §7 in the parent local-agent-core
+# checkout. This exact file is copied to
+# $DSH_HOME/profiles/cordis-app/cordis.patch.yml on first container start
+# ONLY (never overwritten again — your edits here survive restarts and
+# upgrades). Edit this file, then `docker compose restart core`.
+#
+# A top-level YAML array of loader patch entries (id-targeted config
+# overrides, disables, and insert lists; `!!js` expressions allowed).
+# An entry replaces a row's WHOLE config — it does not deep-merge — so
+# restate every field you keep. An empty or comments-only file fails boot;
+# use `[]` (as below) to mean "no patch".
+[]

@@ -1,0 +1,26 @@
+# Cordis Agent Core — one core service for now (n8n joins in Phase 6, per
+# architecture doc §8.1). Run from the repo root: `docker compose -f
+# deploy/docker-compose.yml up --build`.
+services:
+  core:
+    image: cordis-core:dev
+    build:
+      context: ..
+      dockerfile: deploy/core.Dockerfile
+    volumes:
+      # Bind mount, not a named volume — this is the point (architecture doc
+      # §5): `data/harness/profiles/cordis-app/cordis.patch.yml` (repo root,
+      # not deploy/ — relative paths here resolve against this file's own
+      # directory, so `../` keeps state as a repo-root sibling of deploy/,
+      # not nested inside it) is edited from the host, then `docker compose
+      # restart core` picks it up.
+      - ../data/harness:/data/harness
+      - workspace:/workspace
+    ports:
+      - "127.0.0.1:3080:3080"   # loopback only — see architecture doc §2.3 for remote access
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    restart: unless-stopped
+
+volumes:
+  workspace:
