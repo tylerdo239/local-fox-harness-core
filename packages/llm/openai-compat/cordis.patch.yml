@@ -10,3 +10,8 @@
         provider: openai-compat
         baseURL: https://api.openai.com/v1
         apiKeyEnv: OPENAI_API_KEY
+        # Without this the adapter reports no window and compaction-basic has
+        # nothing to measure against, so a long chat grows until the model
+        # rejects it. 32000 matches the Qwen3.5-35B deployment this talks to;
+        # change it with the model.
+        contextWindow: 32000
