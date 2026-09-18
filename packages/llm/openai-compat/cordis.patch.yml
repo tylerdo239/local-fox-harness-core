@@ -3,6 +3,22 @@
 # and bundle-core's own. Only applied when this package's name is listed in
 # a profile's `dsh.profile.bundles` array (deploy/entrypoint.sh) — this file
 # existing is not enough by itself.
+#
+# contextWindow/extraBody read real env vars (see repo-root .env.example) so a
+# packaged deployment can tune them without hand-editing YAML — baseURL/
+# apiKeyEnv deliberately stay static here: those are just credential-ref
+# plumbing, the real values flow through @deepseek-ai/dsh-credentials-local's
+# own env-var fallback (its README: "launch environment wins"), matching
+# `OPENAI_API_KEY`/`OPENAI_BASE_URL` by name already.
+#
+# The whole JS expression is single-quoted below — real bug hit writing this
+# unquoted (confirmed via --dump-config): a bare `!!js expr ? a : b` breaks
+# because YAML's plain-scalar parser reads the ternary's own `: ` as a fresh
+# mapping key/value pair, silently corrupting the value into
+# `'[object Object]': undefined`. Same reason the n8n MCP example in
+# docs/patch-cookbook.md already quotes its own `!!js` Authorization-header
+# expression — anything beyond a bare property-access needs quoting, not
+# just template literals.
 - insert:
     - id: cordis-llm-openai-compat
       name: '@cordis-app/llm-openai-compat'
@@ -10,3 +26,23 @@
         provider: openai-compat
         baseURL: https://api.openai.com/v1
         apiKeyEnv: OPENAI_API_KEY
+        contextWindow: !!js 'process.env.OPENAI_CONTEXT_WINDOW ? Number(process.env.OPENAI_CONTEXT_WINDOW) : undefined'
+        extraBody: !!js 'process.env.OPENAI_EXTRA_BODY ? JSON.parse(process.env.OPENAI_EXTRA_BODY) : undefined'
+
+# Override, not insert — `agent-default-model` already exists as a row from
+# @deepseek-ai/dsh-base (confirmed via a real --dump-config run:
+# `provider: deepseek-official, model: deepseek-flash`, no credential this
+# app ever configures). Without this override a freshly packaged deployment
+# silently defaults to a DeepSeek route the user never set up. This package
+# is listed after dsh-base/bundle-core in deploy/entrypoint.sh's generated
+# `bundles` array, so this override wins (later entry wins a shared id, the
+# convention bundle-core's own cordis.patch.yml documents).
+# 'unconfigured-model' is a deliberate placeholder, not a crash: `model` is a
+# required string for this package, so leaving OPENAI_MODEL_ID unset must
+# still boot cleanly and fail later with a clear model/credential error
+# instead of refusing to start.
+- id: agent-default-model
+  name: '@deepseek-ai/dsh-agent-default-model'
+  config:
+    provider: openai-compat
+    model: !!js process.env.OPENAI_MODEL_ID || 'unconfigured-model'

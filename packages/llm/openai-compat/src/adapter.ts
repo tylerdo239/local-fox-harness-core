@@ -97,7 +97,11 @@ export class OpenAiCompatAdapter extends LlmAdapter {
 
   async *stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
     const [apiKey, baseURL] = await Promise.all([this.resolveApiKey(), this.resolveBaseURL()])
-    const body = serializeRequest(options)
+    // Restored from example-2's original adapter (user request) — a plain
+    // shallow merge, same as the original's `{ ...serializeRequest(options),
+    // ...this.resolveExtraBody() }`, just reading a static Config field here
+    // instead of an env var (see this.config's own doc comment for why).
+    const body = { ...serializeRequest(options), ...this.config.extraBody }
     const url = `${baseURL.replace(/\/+$/, '')}/chat/completions`
 
     let response: Response
@@ -114,7 +118,28 @@ export class OpenAiCompatAdapter extends LlmAdapter {
         signal: options.signal,
       })
     } catch (error) {
-      if (options.signal?.aborted) throw error as Error
+      // Real bug found and fixed (Đợt 20 — the Stop button silently hung
+      // instead of ever closing the turn, confirmed via temporary console
+      // instrumentation in a live test): when dsh-agent's `agent.cancel()`
+      // aborts `options.signal`, it does `controller.abort({kind:'user'})`
+      // — a CUSTOM abort reason (dsh-session's own `AgentCancelCause`
+      // shape), not a DOMException. Per the WHATWG AbortSignal spec, fetch()
+      // then rejects with that exact reason value, so `error` here was the
+      // bare object `{kind:'user'}` — NOT an Error instance at all. The old
+      // `throw error as Error` was a type-cast lie: at runtime it re-threw
+      // that plain object, which the harness's own failure normalizer
+      // doesn't handle the same way it handles a real Error, leaving the
+      // turn stuck open forever (confirmed for real: 3+ minutes with zero
+      // new session events, no `turn/end`). The real reference adapter
+      // (@deepseek-ai/dsh-llm-deepseek) never hits this: it always wraps an
+      // aborted signal's failure in a proper `LlmError` with `code:
+      // 'ABORTED'` before throwing — same fix applied here.
+      console.error('[DIAG] fetch catch, error=', error, 'aborted=', options.signal?.aborted)
+      if (options.signal?.aborted) {
+        const wrapped = new LlmError('request aborted by caller', 'ABORTED', { cause: error })
+        console.error('[DIAG] throwing wrapped LlmError:', wrapped, 'instanceof Error=', wrapped instanceof Error, 'code=', wrapped.code)
+        throw wrapped
+      }
       throw new LlmError(`request to ${url} failed`, 'TRANSPORT', { cause: error })
     }
 
@@ -126,6 +151,14 @@ export class OpenAiCompatAdapter extends LlmAdapter {
       })
     }
 
-    yield* translate(parseSse(response.body, IDLE_TIMEOUT_MS))
+    try {
+      yield* translate(parseSse(response.body, IDLE_TIMEOUT_MS))
+    } catch (error) {
+      // Same fix as above — parseSse's reader can also reject with the raw
+      // `{kind:'user'}` abort reason (mid-stream cancellation), not just
+      // the initial fetch() call.
+      if (options.signal?.aborted) throw new LlmError('request aborted by caller', 'ABORTED', { cause: error })
+      throw error
+    }
   }
 }

@@ -24,6 +24,13 @@ tắc dưới đây — mỗi quy tắc đều dựa trên 1 lỗi thật đã x
 3. **Không tra lại thứ đã tra rồi trong cùng hội thoại.** Nếu đã gọi
    `get_node_types` cho 1 node/discriminator, nhớ lấy thông tin đó dùng tiếp,
    đừng gọi lại y hệt.
+3b. **`list_credentials` chỉ gọi ĐÚNG 1 LẦN cho mỗi credential type cần
+   dùng.** Lỗi thật đã gặp: gọi liền 3 lần với tham số hơi khác nhau
+   (`{query:"Gmail", type:"gmailOAuth2Api"}` rồi `{query:"Gmail"}` rồi
+   `{}`) chỉ để tìm credential Gmail — kết quả cả 3 lần đều rỗng như nhau.
+   Nếu lần gọi đầu tiên đã trả về rỗng, credential đó chưa tồn tại — đừng
+   thử lại với tham số khác, báo thẳng cho người dùng là cần tự kết nối
+   credential đó trong n8n UI trước.
 4. **Ưu tiên tạo workflow đơn giản trước** (vd chỉ trigger + 1-2 node cốt
    lõi), **rồi mở rộng dần bằng các operation của `update_workflow`**
    (addNode, addConnection, updateNodeParameters, setNodeParameter...) thay vì
@@ -43,3 +50,20 @@ tắc dưới đây — mỗi quy tắc đều dựa trên 1 lỗi thật đã x
 7. Luôn `validate_workflow`/spot-check `validate_node_config` trước khi
    `create_workflow_from_code` — bắt lỗi sớm, tránh phải viết lại cả khối
    code chỉ vì 1 lỗi nhỏ.
+8. **Không bao giờ gọi tool tạo workflow (`n8n_upsert_workflow` không kèm
+   `workflowId`, hoặc `create_workflow_from_code`) 2 lần cho cùng 1 workflow
+   trong cùng 1 hội thoại.** Lỗi thật đã gặp: model gọi tạo 2 lần (thường vì
+   quên mất id đã trả về ở lần gọi trước, hay gặp sau nhiều bước xây dựng
+   dài) → n8n tạo ra 2 workflow giống hệt nhau vì n8n không tự chặn trùng
+   tên. Ngay khi tạo thành công, LƯU LẠI `id` trả về và dùng nó
+   (`workflowId`/`update_workflow`) cho MỌI thay đổi tiếp theo trong cùng
+   hội thoại — không bao giờ gọi lại tool tạo mới cho cùng 1 workflow.
+   (`n8n_upsert_workflow` của app này có tự kiểm tra trùng theo tên trong
+   cùng session làm lưới an toàn — nhưng đừng dựa vào đó, tự nhớ id vẫn là
+   cách đúng và nhanh hơn.)
+9. **Sau khi tạo/sửa workflow thành công, LUÔN đưa link mở workflow vào câu
+   trả lời cuối cùng cho user dưới dạng markdown link** (vd
+   `[Mở workflow trong n8n](<url>)`), không chỉ trả về JSON thô. Dùng đúng
+   `editorUrl` trong kết quả trả về nếu gọi `n8n_upsert_workflow`; nếu dùng
+   tool MCP (`create_workflow_from_code`/`publish_workflow`), tự ghép
+   `<n8n-instance-url>/workflow/<id>` từ id trả về.

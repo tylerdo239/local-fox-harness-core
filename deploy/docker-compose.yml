@@ -40,6 +40,16 @@ services:
     build:
       context: ..
       dockerfile: deploy/core.Dockerfile
+    # Repo-root .env (copy from .env.example) — OPENAI_API_KEY/BASE_URL/
+    # MODEL_ID/EXTRA_BODY/CONTEXT_WINDOW. `required: false` so `docker
+    # compose up` still works before a user has created one; env_file only
+    # sets keys actually present in the file (unlike `environment:
+    # ${VAR:-}`, which would force every var to an empty string when unset —
+    # worse than not setting it at all for dsh-credentials-local's own
+    # env-vs-unset fallback logic).
+    env_file:
+      - path: ../.env
+        required: false
     volumes:
       # Bind mount, not a named volume — this is the point (architecture doc
       # §5): `data/harness/profiles/cordis-app/cordis.patch.yml` (repo root,

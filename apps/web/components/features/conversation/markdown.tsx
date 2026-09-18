@@ -9,7 +9,20 @@
 // missing: a `components` map putting every element on our own design
 // tokens instead of raw Tailwind/browser defaults, so it reads as part of
 // the same UI instead of an unstyled dump.
+//
+// Đợt 21 — `remark-gfm` added (user: "chưa tạo ra link ... dẫn đến
+// workflow"): plain `react-markdown` only speaks CommonMark, which has no
+// bare-URL autolinking at all — confirmed for real, a live n8n_upsert_
+// workflow test had the model reply with a literal
+// "http://127.0.0.1:5678/workflow/<id>" (n8n-skill's own new rule asks for
+// this), and it rendered as inert plain text, not a clickable `<a>`. GFM's
+// "autolink literals" extension is what turns a bare URL into a real link,
+// and it needs this plugin explicitly — `remarkPlugins` was empty before.
+// Bonus: this table also fixes GFM tables (`table`/`th`/`td` below were
+// already styled in COMPONENTS but silently never rendered as tables
+// without this — same missing plugin).
 import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import type { ComponentProps } from 'react'
 
 const COMPONENTS: ComponentProps<typeof ReactMarkdown>['components'] = {
@@ -58,5 +71,5 @@ const COMPONENTS: ComponentProps<typeof ReactMarkdown>['components'] = {
 }
 
 export function Markdown({ text }: { text: string }) {
-  return <ReactMarkdown components={COMPONENTS}>{text}</ReactMarkdown>
+  return <ReactMarkdown remarkPlugins={[remarkGfm]} components={COMPONENTS}>{text}</ReactMarkdown>
 }

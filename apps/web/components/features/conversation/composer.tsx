@@ -19,6 +19,20 @@
 // note called it a deliberate keep since example-2 has no equivalent at
 // all — that was true then, but the user now wants it gone regardless.
 //
+// Đợt 20 — re-added, now split into 2 real dsh-agent capabilities instead
+// of 1 (user request: "tham khảo logic ... dsh hay claude", matching
+// Claude Code's own stop-then-resume feel): "Dừng" calls /session-interrupt
+// with `keepInbox: true` (dsh-agent's own CancelOptions — "aborts only the
+// turn and preserves pending items") and flips to a "Tiếp tục" button;
+// "Huỷ bỏ task" calls the same route without it (the original hard cancel,
+// also clears queued/steering work — nothing left to offer continuing).
+// dsh-session's own TurnEndReasonMap documents there is no "paused mid-turn,
+// resume the exact request" primitive ("no step-only abort that keeps the
+// turn running"), so "Tiếp tục" is implemented honestly as sending a plain
+// follow-up message through the SAME `send` mutation as a normal Send —
+// transparent in the chat log (a real "Tiếp tục" bubble appears), not a
+// hidden resume the user can't see happened.
+//
 // Đợt 17 — the "/" skill picker (user request: "khi chat / ko hiện ra các
 // option skill"). Ported from example-2's real SkillMenu.tsx/slashQuery —
 // SettingsDialog/SkillsDialog's own copy already promised this ("Gõ /tên
@@ -33,10 +47,12 @@
 // has one shared cache mechanism, no need for a second.
 import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
-import { listSkills, sendMessage, type SkillSummary } from '../../../lib/api'
+import { Ban, Square } from 'lucide-react'
+import { interruptSession, listSkills, sendMessage, type SkillSummary } from '../../../lib/api'
 import { useChatStore } from '../../../lib/store'
 import { useLocale } from '../../../lib/i18n/locale'
 import { Button } from '../../primitives/button'
+import { isAgentRunning, latestTurnStartSeq } from './conversation'
 
 // The menu is open only while the whole composer text is still the bare
 // command token — matches example-2's own real slashQuery exactly (same
@@ -88,14 +104,43 @@ export function Composer({ sessionId, large = false }: { sessionId: string; larg
   const { t } = useLocale()
   const composerText = useChatStore(state => state.composerText)
   const setComposerText = useChatStore(state => state.setComposerText)
+  const events = useChatStore(state => state.events)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const skills = useQuery({ queryKey: ['skills'], queryFn: listSkills })
   const [menuIndex, setMenuIndex] = useState(0)
   const [menuDismissedFor, setMenuDismissedFor] = useState<string | undefined>(undefined)
+  // True right after a soft "Dừng" (keepInbox) succeeds, until either a new
+  // turn starts or the user sends something — see the file header comment.
+  // Not derived from `events`: turn/end's reason can't tell a soft stop
+  // apart from a hard "Huỷ bỏ task" (both are `{kind:'aborted', reason:
+  // {kind:'user'}}` — dsh-session's own TurnEndReasonMap), so which button
+  // was pressed has to be tracked client-side.
+  const [softStopped, setSoftStopped] = useState(false)
+  // Workaround for a real, confirmed upstream bug (see isAgentRunning's own
+  // comment in conversation.tsx): a cancelled turn never actually gets a
+  // `turn/end` event, so `isAgentRunning(events)` alone would show "running"
+  // forever after Dừng/Huỷ bỏ task — the button would never leave that
+  // state. Tracks which turn (`turn/start`'s own seq) we last asked to
+  // stop; `running` below only trusts the raw event derivation once a
+  // DIFFERENT (newer) turn/start proves the agent genuinely moved on.
+  const [stoppedTurnStartSeq, setStoppedTurnStartSeq] = useState<number | undefined>(undefined)
+  const rawRunning = isAgentRunning(events)
+  const running = rawRunning && latestTurnStartSeq(events) !== stoppedTurnStartSeq
+
+  useEffect(() => { setSoftStopped(false); setStoppedTurnStartSeq(undefined) }, [sessionId])
+  useEffect(() => { if (running) setSoftStopped(false) }, [running])
 
   const send = useMutation({
     mutationFn: (text: string) => sendMessage(sessionId, text),
-    onSuccess: () => { setComposerText('') },
+    onSuccess: () => { setComposerText(''); setSoftStopped(false) },
+  })
+  const stop = useMutation({
+    mutationFn: () => interruptSession(sessionId, { keepInbox: true }),
+    onSuccess: () => { setSoftStopped(true); setStoppedTurnStartSeq(latestTurnStartSeq(events)) },
+  })
+  const cancelTask = useMutation({
+    mutationFn: () => interruptSession(sessionId),
+    onSuccess: () => { setStoppedTurnStartSeq(latestTurnStartSeq(events)) },
   })
 
   const slash = slashQuery(composerText)
@@ -173,11 +218,33 @@ export function Composer({ sessionId, large = false }: { sessionId: string; larg
         }}
       />
       <div className="flex items-center justify-end gap-2">
-        <Button variant="primary" disabled={send.isPending} onClick={submit}>
-          {t('conversation.send')}
-        </Button>
+        {running ? (
+          // Running: ONLY the Stop button — no Send, no Cancel task yet
+          // (matches the requested flow exactly: those 2 only appear AFTER
+          // Dừng is pressed, not alongside it).
+          <Button variant="outline" disabled={stop.isPending} onClick={() => { stop.mutate() }}>
+            <Square size={14} />
+            {t('conversation.stop')}
+          </Button>
+        ) : softStopped ? (
+          <>
+            <Button variant="outline" disabled={cancelTask.isPending} onClick={() => { cancelTask.mutate() }}>
+              <Ban size={14} />
+              {t('conversation.cancelTask')}
+            </Button>
+            <Button variant="primary" disabled={send.isPending} onClick={() => { send.mutate(t('conversation.continue')) }}>
+              {t('conversation.continue')}
+            </Button>
+          </>
+        ) : (
+          <Button variant="primary" disabled={send.isPending} onClick={submit}>
+            {t('conversation.send')}
+          </Button>
+        )}
       </div>
       {send.isError ? <p className="text-xs text-error">{(send.error as Error).message}</p> : null}
+      {stop.isError ? <p className="text-xs text-error">{(stop.error as Error).message}</p> : null}
+      {cancelTask.isError ? <p className="text-xs text-error">{(cancelTask.error as Error).message}</p> : null}
     </div>
   )
 }

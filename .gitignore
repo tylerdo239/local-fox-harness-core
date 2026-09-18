@@ -7,3 +7,5 @@ out/
 *.tsbuildinfo
 /data/
 /.dev-state/
+# Real credentials (OPENAI_API_KEY etc., see .env.example) — never commit.
+/.env

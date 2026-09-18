@@ -228,6 +228,24 @@
   name: '@deepseek-ai/dsh-tool-skill'
   disabled: false
 
+# REAL root cause found for the CONTEXT_WINDOW_EXCEEDED errors while testing
+# n8n's MCP server: dsh-compaction-tool-result-pruner is already mounted by
+# dsh-base with sane defaults (8192/4096/1024 chars) — but shipped
+# `disabled: true`. Without it, a single huge tool result (e.g. an MCP call's
+# verbose dump) is an "indivisible unit" dsh-compaction-basic's own README
+# says it cannot shrink — it can only condense OLDER history, never the giant
+# result that just landed. This isn't n8n-specific (any oversized tool result
+# hits the same wall) and is harmless when no such tool is mounted at all, so
+# — unlike n8n itself — it belongs in the permanent shippable default, not
+# behind an opt-in patch.
+- id: tool-result-pruner
+  name: '@deepseek-ai/dsh-compaction-tool-result-pruner'
+  config:
+    thresholdChars: 8192
+    headChars: 4096
+    tailChars: 1024
+  disabled: false
+
 # cordis-llm-openai-compat, cordis-tool-serper-web-search, cordis-tool-n8n,
 # and cordis-tool-create-skill moved out to their own packages (each with its
 # own cordis.patch.yml) — inserted via the profile's `dsh.profile.bundles`

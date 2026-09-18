@@ -8,6 +8,48 @@ set -eu
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 REPO_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
+ENV_FILE="$REPO_ROOT/.env"
+
+# First-run setup wizard — user request: a non-Docker user should be able to
+# go from a fresh checkout to a running app with ONE command, not
+# `cp .env.example .env` + manually editing it + THEN running this script.
+# Only asks for OPENAI_API_KEY/OPENAI_MODEL_ID (the 2 values with no safe
+# default — everything else in .env.example has one); BASE_URL/EXTRA_BODY/
+# CONTEXT_WINDOW stay editable by hand afterward (advanced, rarely needed
+# for a first try). `[ -t 0 ]` skips this silently in a non-interactive
+# shell (CI, piped stdin) instead of hanging on `read` — falls through to
+# .env.example's own placeholders/defaults there. `|| true` on each `read`:
+# POSIX still assigns the variable (empty) on EOF, so treat an unexpected
+# Ctrl-D as "left blank" rather than aborting the whole script via `set -e`.
+if [ ! -f "$ENV_FILE" ] && [ -t 0 ]; then
+  echo "==> Chưa có .env — nhập nhanh để bắt đầu (Enter để bỏ qua, sửa $ENV_FILE sau):" >&2
+  printf '    OPENAI_API_KEY (bắt buộc để chat hoạt động): ' >&2
+  read -r dev_sh_api_key || true
+  printf '    OPENAI_MODEL_ID (vd gpt-4o-mini — Enter để cấu hình sau): ' >&2
+  read -r dev_sh_model_id || true
+  {
+    echo "OPENAI_API_KEY=$dev_sh_api_key"
+    echo "OPENAI_BASE_URL="
+    echo "OPENAI_MODEL_ID=$dev_sh_model_id"
+    echo "OPENAI_EXTRA_BODY="
+    echo "OPENAI_CONTEXT_WINDOW="
+  } > "$ENV_FILE"
+  if [ -z "$dev_sh_api_key" ]; then
+    echo "    (chưa nhập OPENAI_API_KEY — chat sẽ báo lỗi thiếu credential tới khi bạn điền vào $ENV_FILE)" >&2
+  fi
+  echo "==> Đã lưu $ENV_FILE — sửa lại bất kỳ lúc nào rồi chạy lại ./scripts/dev.sh để áp dụng." >&2
+fi
+
+# Docker gets repo-root .env via docker-compose.yml's `env_file:` on the
+# `core` service; this bare-host path has no equivalent, so source it here.
+# entrypoint.sh itself stays untouched: it has no access to a repo-root .env
+# when run inside a container (only data/harness/workspace are mounted), so
+# env passthrough is correctly each boot path's own concern.
+if [ -f "$ENV_FILE" ]; then
+  set -a
+  . "$ENV_FILE"
+  set +a
+fi
 
 # Node 22.19+/24 required (dsh's own engines field) — the default `node` on
 # a dev machine may be older; nvm/homebrew installs of 22 are common

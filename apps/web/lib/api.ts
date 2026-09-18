@@ -75,6 +75,16 @@ export function forkSession(sessionId: string): Promise<{ sessionId: string }> {
   return request('/session-fork', { method: 'POST', body: JSON.stringify({ sessionId }) })
 }
 
+// Đợt 20 — re-added on request (Đợt 9 had removed it): `agent.cancel()`'s
+// real `keepInbox` option (dsh-agent's own README — "aborts only the turn
+// and preserves pending items" vs the default that also clears the inbox)
+// is what distinguishes the composer's 2 buttons — a soft "Dừng" (keepInbox
+// true, offers a Continue afterward) from a hard "Huỷ bỏ task" (keepInbox
+// false/omitted, nothing left to continue).
+export function interruptSession(sessionId: string, options?: { keepInbox?: boolean }): Promise<{ ok: true }> {
+  return request('/session-interrupt', { method: 'POST', body: JSON.stringify({ sessionId, keepInbox: options?.keepInbox }) })
+}
+
 export function listApprovals(sessionId: string): Promise<{ approvals: PendingApproval[] }> {
   return request(`/session-approvals?id=${encodeURIComponent(sessionId)}`)
 }

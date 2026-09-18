@@ -521,7 +521,11 @@ export function apply(ctx: Context): void {
       if (sessionId === undefined) return badRequest('sessionId is required')
       const agent = ctx.agents.get(SessionId(sessionId))
       if (agent === undefined) return notFoundResponse(`session ${sessionId} is not live`)
-      agent.cancel({ kind: 'user' })
+      // keepInbox (dsh-agent's own CancelOptions, README: "aborts only the
+      // turn and preserves pending items") is what the composer's 2 buttons
+      // map to — a soft "Dừng" (true, resumable via a follow-up) vs a hard
+      // "Huỷ bỏ task" (omitted, also clears queued/steering work).
+      agent.cancel({ kind: 'user' }, { keepInbox: body['keepInbox'] === true })
       return json({ ok: true })
     },
   })

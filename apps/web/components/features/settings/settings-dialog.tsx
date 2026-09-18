@@ -36,6 +36,14 @@ type Tab = 'general' | 'config' | 'account'
 
 // One credential field, reused for Serper/n8n below instead of tripling the
 // same save/remove/status plumbing WebSearchTab used to have on its own.
+//
+// Đợt 19 — user request: once a credential is already configured, don't
+// show a blank input sitting there by default (looks like it needs
+// re-entering, and invites accidentally overwriting a working value) —
+// collapse to a status line + "Thay đổi" (Change) button instead; only
+// clicking it reveals the input + Lưu (Save) + Huỷ (Cancel). A never-
+// configured field has no "collapsed" state to show, so it always renders
+// the input directly (same as before this change).
 function CredentialField({
   refName, title, hint, placeholder,
 }: { refName: string; title: string; hint?: ReactNode; placeholder: string }) {
@@ -43,12 +51,15 @@ function CredentialField({
   const queryClient = useQueryClient()
   const credentials = useQuery({ queryKey: ['credentials'], queryFn: listCredentials })
   const credential = credentials.data?.credentials.find(entry => entry.ref === refName)
+  const isConfigured = credential?.configured === true
   const [value, setValue] = useState('')
+  const [editing, setEditing] = useState(false)
 
   const save = useMutation({
     mutationFn: () => setCredential(refName, value),
     onSuccess: () => {
       setValue('')
+      setEditing(false)
       void queryClient.invalidateQueries({ queryKey: ['credentials'] })
     },
   })
@@ -57,30 +68,47 @@ function CredentialField({
     onSuccess: () => { void queryClient.invalidateQueries({ queryKey: ['credentials'] }) },
   })
 
+  const showInput = !isConfigured || editing
+
   return (
     <div className="flex flex-col gap-2 border-b border-border pb-4 last:border-none last:pb-0">
       <div>
         <div className="mb-1 text-sm font-semibold text-fg">{title}</div>
         {hint !== undefined ? <p className="m-0 text-xs text-muted">{hint}</p> : null}
       </div>
-      <span className={`text-xs ${credential?.configured === true ? 'text-status-success' : 'text-muted'}`}>
-        {credential?.configured === true ? t('settings.configFieldConfigured') : t('settings.configFieldNotConfigured')}
+      <span className={`text-xs ${isConfigured ? 'text-status-success' : 'text-muted'}`}>
+        {isConfigured ? t('settings.configFieldConfigured') : t('settings.configFieldNotConfigured')}
       </span>
-      <Input
-        type="password"
-        placeholder={placeholder}
-        value={value}
-        onChange={(event) => { setValue(event.target.value) }}
-      />
+      {showInput ? (
+        <Input
+          type="password"
+          placeholder={placeholder}
+          value={value}
+          onChange={(event) => { setValue(event.target.value) }}
+        />
+      ) : null}
       <div className="flex gap-2">
-        <Button variant="primary" className="self-start" disabled={value === '' || save.isPending} onClick={() => { save.mutate() }}>
-          {t('skills.save')}
-        </Button>
-        {credential?.configured === true ? (
-          <Button variant="outline" className="self-start" disabled={remove.isPending} onClick={() => { remove.mutate() }}>
-            {t('models.remove')}
-          </Button>
-        ) : null}
+        {showInput ? (
+          <>
+            <Button variant="primary" className="self-start" disabled={value === '' || save.isPending} onClick={() => { save.mutate() }}>
+              {t('skills.save')}
+            </Button>
+            {isConfigured ? (
+              <Button variant="outline" className="self-start" onClick={() => { setValue(''); setEditing(false) }}>
+                {t('settings.configFieldCancel')}
+              </Button>
+            ) : null}
+          </>
+        ) : (
+          <>
+            <Button variant="outline" className="self-start" onClick={() => { setEditing(true) }}>
+              {t('settings.configFieldChange')}
+            </Button>
+            <Button variant="outline" className="self-start" disabled={remove.isPending} onClick={() => { remove.mutate() }}>
+              {t('models.remove')}
+            </Button>
+          </>
+        )}
       </div>
       {save.isError ? <span className="text-[0.85em] text-error">{(save.error as Error).message}</span> : null}
     </div>

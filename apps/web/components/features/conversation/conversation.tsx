@@ -111,6 +111,46 @@ export function hasRealUserMessage(events: SessionEvent[]): boolean {
   })
 }
 
+// Đợt 20 — exported for composer.tsx's Stop/Cancel-task buttons. The LATEST
+// of `turn/start`/`turn/end` tells whether the agent is actively working —
+// same simple derivation this file already uses events for elsewhere.
+//
+// REAL, CONFIRMED UPSTREAM BUG (not this app's code): a turn cancelled via
+// `agent.cancel()` never actually gets a `turn/end` appended. Traced end to
+// end with temporary console instrumentation directly in
+// `node_modules/@deepseek-ai/dsh-agent-loop` (reverted after, not shipped):
+// `ReactLoopAgent.turn()`'s own catch block correctly computes
+// `turnEnds = {kind:'aborted', reason: signal.reason}` and reaches its
+// `finally`, but `this.session.append('turn/end', {turn, reason: turnEnds})`
+// itself THROWS — `signal.reason` (dsh-session's own frozen
+// `AgentCancelCause`) is a null-prototype object, and dsh-session's
+// `Session.append()` rejects any value that isn't JSON-serializable in this
+// specific strict sense (`Object.getPrototypeOf(value) === Object.prototype`
+// — a null-prototype object fails this check even though `JSON.stringify`
+// on it works fine). The thrown error is then silently swallowed by
+// `ReactLoopAgent.kick()`'s own empty `catch (_error) {}` — so the turn
+// stays open forever, with zero further events and zero console output.
+// Not fixable from this app (it's inside a 3rd-party dependency) — worked
+// around below with `latestTurnStartSeq` instead of trusting `turn/end`.
+export function isAgentRunning(events: SessionEvent[]): boolean {
+  let running = false
+  for (const event of events) {
+    if (event.type === 'turn/start') running = true
+    else if (event.type === 'turn/end') running = false
+  }
+  return running
+}
+
+// The seq of the most recent `turn/start` — lets composer.tsx tell "the
+// turn I just told the agent to stop" apart from "a genuinely new turn
+// started since", without relying on the `turn/end` that the bug above
+// means never arrives for a cancelled turn.
+export function latestTurnStartSeq(events: SessionEvent[]): number | undefined {
+  let seq: number | undefined
+  for (const event of events) if (event.type === 'turn/start') seq = event.seq
+  return seq
+}
+
 type LogEntry =
   | { kind: 'notice'; id: string; text: string }
   | { kind: 'tool'; id: string; name: string; args: string; status: 'running' | 'done' | 'error'; resultText: string | null }

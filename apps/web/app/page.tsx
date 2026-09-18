@@ -64,9 +64,23 @@ function ChatView({ sessionId }: { sessionId: string }) {
   const setSessionId = useChatStore(state => state.setSessionId)
   const events = useChatStore(state => state.events)
   const isEmpty = !hasRealUserMessage(events)
+  const logRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => { setSessionId(sessionId) }, [sessionId, setSessionId])
   useSessionStream(sessionId)
+
+  // Real gap fixed (user: "UI chat đang chưa có auto scroll như dsh hay
+  // claude") — ported from example-2's own real Conversation.tsx, which
+  // does exactly this unconditional scroll-to-bottom on every events change
+  // (no "only if already near bottom" check there either — matching it
+  // exactly rather than inventing a fancier policy). Covers both a message
+  // streaming in during an active turn AND opening/switching to a session
+  // (events repopulate from empty as history loads, landing at the latest
+  // message instead of the top).
+  useEffect(() => {
+    const el = logRef.current
+    if (el !== null) el.scrollTop = el.scrollHeight
+  }, [events])
 
   return (
     <div className="flex h-full flex-col bg-bg">
@@ -78,7 +92,7 @@ function ChatView({ sessionId }: { sessionId: string }) {
             <h2 className="m-0 text-[1.4em] font-medium text-fg">{t('conversation.emptyHeading')}</h2>
           </div>
         ) : (
-          <div className="min-h-0 flex-1 overflow-y-auto p-4">
+          <div ref={logRef} className="min-h-0 flex-1 overflow-y-auto p-4">
             <Conversation events={events} />
           </div>
         )}
@@ -91,64 +105,98 @@ function ChatView({ sessionId }: { sessionId: string }) {
 type ModalDialog = 'settings' | 'skills' | undefined
 
 function AppFrame() {
-  const { route, goToSession, goToAutomations } = useAppRoute()
+  const { route, goToSession, goToAutomations, goHome } = useAppRoute()
   const { frameRef, gridTemplateColumns, collapsed, toggleCollapse } = useLayoutColumns()
   const [dialog, setDialog] = useState<ModalDialog>(undefined)
-  const sessionId = route.kind === 'chat' ? route.sessionId : undefined
   const queryClient = useQueryClient()
   const events = useChatStore(state => state.events)
 
-  // Real gap fixed ("flow tạo session mới ... chưa có, check lại và thêm"):
-  // nothing invalidated the sidebar's `['sessions']` query after creating a
-  // session, so a brand-new chat only showed up in HistoryChat once some
-  // OTHER action (rename/delete) happened to refetch it, or on a full page
-  // reload — "+ New chat" visibly opened the center pane with nothing to
-  // show for it in the sidebar.
-  //
-  // Second gap fixed the same pass, matching example-2's own real
-  // `hasChatted`/`newSessionDisabled` behavior (App.tsx): clicking
-  // "+ New chat" while already viewing a session nobody has typed into yet
-  // used to spawn ANOTHER brand-new backend session+agent every single
-  // time — a real chat platform reuses the empty draft instead of
-  // multiplying "Untitled" rows. `hasChatted` is false only while viewing
-  // an actual (already-created) session with zero real messages so far —
-  // landing on `/` with sessionId still undefined (the auto-create effect
-  // below hasn't resolved yet) is unaffected.
-  const hasChatted = sessionId === undefined || hasRealUserMessage(events)
-  const newSessionDisabled = route.kind === 'chat' && !hasChatted
+  // Real gap fixed (user: "UI flow sai rồi ... URL đã tạo và show route 1
+  // session chat rồi ... nên ẩn đi chờ chat thì mới dẫn đến route id chat
+  // đó") — ported from example-2's own real, DELIBERATE behavior
+  // (App.tsx's `handleFrame` `case "session"`, its own comment verbatim:
+  // "Deliberately does NOT touch the URL here — receiving a session frame
+  // just means a session id was assigned, not that it has any real content
+  // yet. The URL only transitions to /chat/<id> at the moment a real
+  // message is actually sent"). A freshly created session lives here,
+  // separate from the route, until hasRealUserMessage flips true.
+  const [pendingSessionId, setPendingSessionId] = useState<string | undefined>(undefined)
+  const sessionId = route.kind === 'chat' ? route.sessionId : pendingSessionId
 
-  function startNew(replace = false): void {
+  // Matches example-2's own `hasChatted`/`newSessionDisabled` guard exactly
+  // (no `route.kind === 'chat'` condition — a hidden pending draft counts
+  // the same as a visible-but-empty `/chat/<id>` one): clicking "+ New
+  // chat" while already on an empty draft is a no-op (real chat platforms
+  // don't spawn a second empty conversation either), not a fresh backend
+  // session every click.
+  const hasChatted = sessionId === undefined || hasRealUserMessage(events)
+  const newSessionDisabled = !hasChatted
+
+  function startNew(): void {
     if (newSessionDisabled) return
+    setPendingSessionId(undefined)
     createSession()
-      .then(({ sessionId: newId }) => {
-        goToSession(newId, replace)
-        void queryClient.invalidateQueries({ queryKey: ['sessions'] })
-      })
+      .then(({ sessionId: newId }) => { setPendingSessionId(newId) })
       .catch((error: unknown) => { console.error('failed to create session', error) })
   }
 
+  // The actual URL reveal — always a replaceState, matching example-2's own
+  // unconditional `replaceChatUrl` at this exact transition (this isn't a
+  // "new page" the user navigated to, it's the current draft finally
+  // becoming real). No manual sidebar-refresh needed here: sending the
+  // first message also fires a `session/title` event, and
+  // use-session-stream.ts already invalidates the `['sessions']` query on
+  // that — the newly-real session picks itself up in HistoryChat for free.
+  //
+  // Real race found and fixed via a live headless-browser test (Puppeteer,
+  // "+ New chat" from an already-chatted session): the URL promoted to the
+  // BRAND NEW pending session within ~100ms, before it had ever received a
+  // message. Root cause — `events` here can still be the OLD session's
+  // real messages for one render: ChatView's own effect is what clears the
+  // store to the new sessionId, and effects run child-before-parent in the
+  // same commit, but THIS effect's closure over `events` was captured at
+  // render time, before that clear runs. Gating on the store's own
+  // `sessionId` actually matching `pendingSessionId` (not just it being
+  // defined) skips exactly that one stale render instead of trusting
+  // `events` before they can possibly belong to the pending session.
+  const storeSessionId = useChatStore(state => state.sessionId)
+  useEffect(() => {
+    if (pendingSessionId !== undefined && storeSessionId === pendingSessionId && hasRealUserMessage(events)) {
+      goToSession(pendingSessionId, true)
+      setPendingSessionId(undefined)
+    }
+  }, [pendingSessionId, storeSessionId, events, goToSession])
+
   // Real gap fixed ("khung chat trung tâm ... tôi cần khung chat có input
   // hiện ra sẵn luôn ... chứ ko phải 1 nút ấn"): example-2's own App.tsx
-  // ALWAYS connects a fresh "new" session the instant it loads/logs in
-  // (`connect(..., sessionIdFromUrl() ?? "new")`) — landing on `/` is never
-  // a bare click-through screen there. Mirrors that here: land on `/` with
-  // no chat route yet -> create one immediately, same call "+ New chat"
-  // makes. `replace` (not `push`) since this is a correction the app makes
-  // on the user's behalf, not a click — matches example-2's own
-  // replaceState-vs-pushState rule (App.tsx's own comment on
-  // replaceChatUrl/pushChatUrl). Guarded by a ref, not just the `route.kind`
-  // dependency, so React's dev-mode double-invoke of a fresh effect can't
-  // fire this twice and spawn 2 sessions.
-  const autoCreatingRef = useRef(false)
+  // ALWAYS connects a fresh "new" session the instant it loads/logs in —
+  // landing on `/` is never a bare click-through screen there. Mirrors that
+  // here: land on `/` with no chat route yet -> create one immediately,
+  // same call "+ New chat" makes; no navigation needed since `/` is already
+  // exactly where a hidden pending draft belongs.
+  //
+  // Fires at most ONCE per page load — real race bug found and fixed via a
+  // live headless-browser test (Puppeteer): resetting this ref whenever
+  // `route.kind !== 'home'` meant clicking "+ New chat" from an existing
+  // chat (which itself calls `goHome()`, transitioning route.kind back to
+  // 'home') re-armed this effect, which then fired ITS OWN `startNew()` in
+  // a race against the click handler's own explicit call — 2 sessions
+  // created, the second one's pendingSessionId winning arbitrarily. "+ New
+  // chat" and this effect are 2 different, mutually-exclusive triggers for
+  // the exact same action; only ever needing the auto-trigger once, on
+  // whichever render first sees a bare `/` with nothing to show yet, avoids
+  // the overlap entirely — every subsequent return to `/` is already
+  // someone else's explicit call (startNew() above).
+  const autoCreateDoneRef = useRef(false)
   useEffect(() => {
-    if (route.kind !== 'home') { autoCreatingRef.current = false; return }
-    if (autoCreatingRef.current) return
-    autoCreatingRef.current = true
-    startNew(true)
+    if (autoCreateDoneRef.current || route.kind !== 'home') return
+    autoCreateDoneRef.current = true
+    startNew()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [route.kind])
 
   function switchSession(id: string): void {
+    setPendingSessionId(undefined)
     goToSession(id)
   }
 
@@ -161,7 +209,15 @@ function AppFrame() {
       <Sidebar
         collapsed={collapsed}
         onToggleCollapse={toggleCollapse}
-        onNewSession={() => { startNew() }}
+        onNewSession={() => {
+          // Real pushState — an explicit "New chat" click deserves its own
+          // back-button entry, same category as switchSession (matches
+          // example-2's own `pushHomeUrl()` at this exact call site). A
+          // no-op when already home: pushing `/` again on top of `/` would
+          // just be a redundant history entry.
+          if (route.kind !== 'home') goHome()
+          startNew()
+        }}
         newSessionDisabled={newSessionDisabled}
         activeSessionId={sessionId}
         onSwitchSession={switchSession}

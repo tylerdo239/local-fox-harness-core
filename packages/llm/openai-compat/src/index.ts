@@ -44,6 +44,20 @@ export interface Config {
   readonly apiKeyEnv: string
   /** Optional context-window size in tokens — needed by dsh-compaction-basic to compact before the provider rejects an oversized request. */
   readonly contextWindow?: number
+  /**
+   * Optional JSON object shallow-merged into every request body, for
+   * server-specific fields the wire protocol itself has no place for — e.g.
+   * vLLM's `{"chat_template_kwargs":{"enable_thinking":false}}` turns off
+   * Qwen's "thinking" mode (fewer reasoning tokens per turn, real lever
+   * against context-budget pressure), or `{"cache":{"no-cache":true}}` /
+   * `{"timeout":240}` for a specific proxy's own extensions. Restored from
+   * example-2's original adapter (user request) — that version read this
+   * from `OPENAI_EXTRA_BODY` via dsh-launch-environment (env vars); this
+   * app has no env-var-editing UI at all, so it's a plain static Config
+   * field instead (set via cordis.patch.yml, same tier as contextWindow —
+   * deployment/model-specific, not a per-user Settings toggle).
+   */
+  readonly extraBody?: Record<string, unknown>
 }
 
 export const Config: z<Config> = z.object({
@@ -51,6 +65,7 @@ export const Config: z<Config> = z.object({
   baseURL: z.string().required().default('https://api.openai.com/v1').description('Base URL up to but not including /chat/completions.'),
   apiKeyEnv: z.string().required().role('credential-ref').default('OPENAI_API_KEY').description('Credential ref the API key resolves from.'),
   contextWindow: z.number().description('Optional context-window size in tokens, for automatic compaction.'),
+  extraBody: z.any().description('Optional JSON object shallow-merged into every request body (server-specific fields, e.g. vLLM chat_template_kwargs).'),
 })
 
 export function apply(ctx: Context, config: Config): void {

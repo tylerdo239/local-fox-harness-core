@@ -110,7 +110,7 @@ class WebhookHttpError extends Error {
 
 interface N8nTag { readonly id: string; readonly name: string }
 interface N8nNode { readonly name: string; readonly type: string; readonly parameters?: Record<string, unknown> }
-interface N8nWorkflow { readonly id: string; readonly active: boolean; readonly nodes: readonly N8nNode[] }
+interface N8nWorkflow { readonly id: string; readonly name: string; readonly active: boolean; readonly nodes: readonly N8nNode[] }
 
 async function n8nRequest(ctx: Context, config: Config, path: string, init?: RequestInit): Promise<unknown> {
   const credential = await ctx.credentials.resolve(credentialRef(config.apiKeyEnv))
@@ -481,11 +481,38 @@ export function apply(ctx: Context, config: Config): void {
       const workflow = coerceWorkflowArg(args.workflow)
       const { valid, errors } = validateWorkflowStructure(workflow)
       if (!valid) throw new Error(`workflow failed local validation: ${errors.join('; ')}`)
-      if (args.workflowId !== undefined) {
-        return asJson(await n8nRequest(ctx, config, `/workflows/${encodeURIComponent(args.workflowId)}`, {
+      let workflowId = args.workflowId
+      // Real bug found and fixed (user: "nó tự tạo 2 flow duplicate y hệt
+      // nhau"): nothing stopped the model from calling this tool twice with
+      // no workflowId for the same intended workflow (e.g. after losing
+      // track of the id the first call returned, common after a long
+      // multi-step build) — each call created a genuinely separate n8n
+      // workflow with identical content, since n8n's own POST /workflows
+      // has no name-uniqueness constraint at all. "Upsert" should mean
+      // upsert: if a workflow with the exact same name already exists,
+      // treat this call as an update of that one instead of inserting a
+      // fresh duplicate.
+      //
+      // Deliberately matches by NAME ALONE, not scoped to this session's own
+      // tag (an earlier version tried that): confirmed for real, against
+      // this exact live n8n instance, that tag creation/lookup is
+      // genuinely unreliable (the "already exists" phantom-tag quirk
+      // getOrCreateTag's own comment already documents — reproduced again
+      // here, every single attempt, with a fresh randomly-suffixed tag
+      // name) — gating the dedup check on a tag resolving would silently
+      // defeat it exactly when it matters. A same-named workflow from an
+      // unrelated session is a rare false-positive risk worth accepting
+      // over the confirmed, reproduced-today failure mode of tags.
+      if (workflowId === undefined && typeof (workflow as { name?: unknown }).name === 'string') {
+        const existing = await n8nRequest(ctx, config, `/workflows?name=${encodeURIComponent((workflow as { name: string }).name)}`) as { data: N8nWorkflow[] }
+        workflowId = existing.data[0]?.id
+      }
+      if (workflowId !== undefined) {
+        const updated = await n8nRequest(ctx, config, `/workflows/${encodeURIComponent(workflowId)}`, {
           method: 'PUT',
           body: JSON.stringify(workflow),
-        }))
+        }) as N8nWorkflow
+        return asJson({ ...updated, editorUrl: editorWorkflowUrl(config, updated.id) })
       }
       const created = await n8nRequest(ctx, config, '/workflows', {
         method: 'POST',
@@ -494,7 +521,8 @@ export function apply(ctx: Context, config: Config): void {
       // Đợt 13 — dropped the 'agent-generated' tag (user request: "bỏ việc
       // đánh tag agent-generated đi"); session:<id> stays, it's still real
       // provenance ("which chat made this"), just no longer the dashboard
-      // filter key (see /automations route's own comment).
+      // filter key (see /automations route's own comment) — and now also
+      // what the de-dup check above matches against.
       const wantedTags: (string | undefined)[] = []
       if (exec.agent !== undefined) wantedTags.push(await getOrCreateTag(ctx, config, `session:${exec.agent.session.id}`))
       const tagIds = wantedTags.filter((id): id is string => id !== undefined)
@@ -505,7 +533,10 @@ export function apply(ctx: Context, config: Config): void {
       // n8n's create response predates tagging; return what the tags call
       // just confirmed instead of the stale pre-tag object (confirmed for
       // real: created.tags reads back empty even after a successful PUT).
-      return asJson({ ...created, tags })
+      // editorUrl (Đợt 21 — user: "chưa tạo ra link ... dẫn đến workflow")
+      // gives the model a real clickable URL to surface in its own reply —
+      // same helper /automations already uses for its "Open in n8n" button.
+      return asJson({ ...created, tags, editorUrl: editorWorkflowUrl(config, created.id) })
     },
   })), 'cordis-n8n: n8n_upsert_workflow')
 

@@ -50,9 +50,16 @@ once never conflicts) between restarts.
 
 ### Set a model credential
 
-No model call works until an API key is stored. Easiest path: open the app,
-click **Model & credentials** (`?view=settings`), paste a key (e.g.
-`DEEPSEEK_API_KEY`). It takes effect immediately, no restart. See
+No model call works until `OPENAI_API_KEY` (and ideally `OPENAI_MODEL_ID`) is
+set — this app's own UI has no settings screen for these two (only
+Serper/n8n credentials go through **Settings → Config**; the default
+`@deepseek-ai/dsh-client-ui-settings-models` screen is disabled, see
+`packages/bundle-core/cordis.patch.yml`'s header comment). Easiest path:
+just run `pnpm run dev` (or `./scripts/dev.sh` directly) — on a fresh
+checkout with no `.env` yet, it asks for both interactively on first run and
+writes `.env` for you, so setup is still a single command. See
+`docs/getting-started.md` for the full env var reference (all 5
+`OPENAI_*` vars, Docker's `.env` passthrough, etc.) and
 `docs/patch-cookbook.md` for adding other providers (OpenAI-compatible
 gateways, self-hosted vLLM/Ollama/LM Studio, etc.) and enabling the n8n
 integration.
@@ -68,6 +75,13 @@ If a change bumped `@deepseek-ai/dsh-*` versions in `package.json` (see
 "Upgrading dsh" in `docs/cordis-agent-implementation-plan.md` §10), `pnpm run
 dev`'s unconditional `pnpm install` picks that up the same way — nothing
 extra to run.
+
+For a self-hosting end user (not a dev) updating a Docker deployment while
+preserving their existing sessions/credentials/n8n data, see
+`docs/upgrading.md` — same `git pull` mechanism, plus what does and doesn't
+propagate automatically to an already-running install (package-tier
+`cordis.patch.yml` changes do; the profile-tier one, materialized once on
+first boot, doesn't).
 
 ## Everyday commands
 
@@ -101,7 +115,7 @@ packages/llm/openai-compat/      # generic OpenAI-compatible LlmAdapter (own pac
 packages/tool/serper-web-search/ # Serper.dev search source for dsh-tool-web (own package)
 apps/web/                        # Next.js static-export chat UI, served by cordis-ui
 deploy/                          # entrypoint.sh (shared by local dev and Docker), Dockerfile, compose
-docs/                            # architecture doc, implementation plan, patch cookbook, UI clone plan
+docs/                            # architecture doc, implementation plan, patch cookbook, UI clone plan, getting-started, upgrading
 scripts/dev.sh                   # local (non-Docker) dev runner — see "Run it locally" above
 ```
 

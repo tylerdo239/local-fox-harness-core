@@ -9,6 +9,7 @@
   },
   "scripts": {
     "setup": "pnpm install && pnpm run build",
+    "start": "./scripts/start.sh",
     "build": "pnpm --dir packages/llm/openai-compat run build && pnpm --dir packages/tool/serper-web-search run build && pnpm --dir packages/tool/n8n run build && pnpm --dir packages/tool/create-skill run build && pnpm --dir packages/bundle-core run build && pnpm --dir apps/web run build",
     "dev": "./scripts/dev.sh",
     "typecheck": "pnpm --dir packages/llm/openai-compat exec tsc --noEmit -p tsconfig.json && pnpm --dir packages/tool/serper-web-search exec tsc --noEmit -p tsconfig.json && pnpm --dir packages/tool/n8n exec tsc --noEmit -p tsconfig.json && pnpm --dir packages/tool/create-skill exec tsc --noEmit -p tsconfig.json && pnpm --dir packages/bundle-core exec tsc --noEmit -p tsconfig.json && pnpm --dir apps/web run typecheck"
