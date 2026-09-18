@@ -170,12 +170,54 @@
   config:
     fetch: true
     searchTimeoutMs: 60000
+    # 30_000 (the package default) is short for a slow origin: measured on
+    # blog.mean.ceo, a good run takes 8.1s and bad ones crossed 30s twice in one
+    # turn, costing the model two wasted steps on "tool call timed out". Matched
+    # to searchTimeoutMs above.
+    fetchTimeoutMs: 60000
+    # The second raw-HTML cut: renderBody() slices the body at this value BEFORE
+    # turndown runs, so it truncates markup, not text — same reason maxBodyChars
+    # above is no longer the budget. Raised past any real page; cordis-web-clean
+    # is what bounds the result the model reads.
+    fetchMaxOutputChars: 5000000
   disabled: false
 - id: web
   name: '@deepseek-ai/dsh-web'
   config:
     searchProvider: serper
     fetchProvider: http
+
+# How much of a fetched page reaches the model. The package's own default is
+# 100_000 characters — sized for a model with a 200k+ window, not for the 32_000
+# this deployment declares: measured 2026-09-18, one ordinary Wikipedia page came
+# back at 22_401 characters (~6_400 tokens, a fifth of the window) and the
+# default cap allows nearly four times that from a single call. The turn that
+# found the NAT64 crash had called web_fetch three times in a row.
+#
+# 8_000 was tried first, to match tool-result-pruner's threshold above, and
+# MEASURED WRONG: the same Wikipedia page came back as 229 characters — its
+# title plus "(Content truncated...)" — and the model then answered from its own
+# training data as if it had read the page. The reason is where the cap applies,
+# in dsh-web-fetch-http's own body handling:
+#   const decoded = decoder.decode(bytes);
+#   const content = truncatedByChars ? decoded.slice(0, maxBodyChars) : decoded;
+#   const body = kind === "html" ? { kind: "html", content } : ...
+# It slices the RAW HTML and extracts text afterwards, so the budget is spent on
+# <head>, stylesheets and nav before any prose. Measured ratio on that page:
+# 100_000 raw HTML -> 22_400 characters of text, about 22%. 40_000 therefore
+# yields roughly 9_000 characters (~2_600 tokens) of readable text, while the
+# worst case — a plain-text document, where the cap is all prose — is 40_000
+# characters (~11_400 tokens), still far under the 100_000 default's ~28_500.
+- id: web-fetch-http
+  name: '@deepseek-ai/dsh-web-fetch-http'
+  config:
+    # Deliberately not the budget any more — see src/web-clean.ts. This cap
+    # slices RAW HTML, so any value small enough to bound cost also cuts before
+    # the article starts; 40_000 left the Nokia page with nothing but its
+    # navigation. Raised past `maxResponseBytes` (5 MB, the provider's real
+    # guard, unchanged) so it never binds, and cordis-web-clean caps the
+    # extracted prose instead.
+    maxBodyChars: 5000000
 
 # Real bug reported: chat in Vietnamese, agent replies in English. Root
 # cause found — dsh-web-app's own default persona (personaPrefix/Suffix
@@ -213,6 +255,68 @@
     bundledSkillDir: !!js process.env.CORDIS_BUNDLED_SKILL_DIR
   disabled: false
 
+# 2026-09-18 — the same gap as tool-web/tool-skill above, one layer wider, found
+# by deploying this repo from scratch and then just asking the agent to do
+# ordinary work. Asked to create a file and read it back, it answered that the
+# file had been created, quoted its contents, and named the directory — while
+# calling no tool at all and leaving the workspace empty. The reason: the whole
+# model-facing tool roster of dsh-base arrives `disabled: true` from
+# dsh-web-app's patch layer, so the session offered exactly four tools
+# (create_skill, skill, web_fetch, web_search). The sandbox and policy rows that
+# GUARD file and shell access (fs-sandbox, bash-sandbox, fs-observation-policy,
+# approval, permission) were all live the whole time — only the tools they guard
+# were missing, which is why nothing failed loudly.
+#
+# A patch replaces a row's WHOLE config, so each row restates the config the
+# dump shows it owning, not just `disabled`.
+- id: tool-fs
+  name: '@deepseek-ai/dsh-tool-fs'
+  disabled: false
+- id: tool-fs-search
+  name: '@deepseek-ai/dsh-tool-fs-search'
+  config:
+    sampleOverCapGlobResults: false
+  disabled: false
+- id: tool-bash
+  name: '@deepseek-ai/dsh-tool-bash'
+  disabled: false
+
+# `tool-bash` advertises `run_in_background` (its own default) but the base
+# composition disables the job registry, so a real turn that used it got back
+# "background jobs unavailable: no job controller serves this agent (load
+# @deepseek-ai/dsh-tool-jobs in its composition)" — twice in a row, after which
+# the model gave up and told the user to run the command in their own terminal.
+# The other way out is `enableRunInBackground: false` on the row above; enabling
+# the controls instead costs 273 tokens of tool descriptions (measured over
+# dsh-tool-jobs' own `description:` strings), under 1% of this deployment's
+# 32 K window, and keeps long-running commands usable.
+- id: tool-jobs
+  disabled: false
+
+# Tool output is what fills a context window once the three rows above exist:
+# this trims anything past 8 KB to its head and tail in the model-visible copy,
+# leaving the full text in the session log.
+- id: tool-result-pruner
+  name: '@deepseek-ai/dsh-compaction-tool-result-pruner'
+  config:
+    thresholdChars: 8192
+    headChars: 4096
+    tailChars: 1024
+  disabled: false
+
+# Same family, found in the same pass: a chat had no compaction at all. Nothing
+# trimmed a growing conversation, so a long session would keep sending the whole
+# history until the model's own context window rejected it. `compaction-basic`
+# needs a window size to measure against, which the openai-compat row now
+# declares (packages/llm/openai-compat/cordis.patch.yml). `command-compact` is
+# the matching user gesture — compact on demand instead of only at the threshold.
+- id: compaction-basic
+  name: '@deepseek-ai/dsh-compaction-basic'
+  disabled: false
+- id: command-compact
+  name: '@deepseek-ai/dsh-command-compact'
+  disabled: false
+
 # Real, bigger gap found while testing the new "/" skill picker (Đợt 17):
 # @deepseek-ai/dsh-tool-skill — the package that (a) surfaces the skill
 # catalog + a `skill` load tool to the MODEL, and (b) implements the real
@@ -241,3 +345,9 @@
       name: '@cordis-app/bundle-core/gateway'
     - id: cordis-audit
       name: '@cordis-app/bundle-core/audit'
+    - id: cordis-prompt
+      name: '@cordis-app/bundle-core/prompt'
+    - id: cordis-resilience
+      name: '@cordis-app/bundle-core/resilience'
+    - id: cordis-web-clean
+      name: '@cordis-app/bundle-core/web-clean'
