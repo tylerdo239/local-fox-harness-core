@@ -9,7 +9,16 @@
 // missing: a `components` map putting every element on our own design
 // tokens instead of raw Tailwind/browser defaults, so it reads as part of
 // the same UI instead of an unstyled dump.
+//
+// Tables were reported broken by the user and the cause was here: pipe tables
+// are GitHub-Flavoured Markdown, which `react-markdown` does NOT parse on its
+// own — it needs `remark-gfm`. Without the plugin the `table`/`th`/`td` entries
+// below could never fire, so every table this model produces (and it produces
+// them constantly — a plain "how do TCP and UDP differ?" comes back as one)
+// rendered as raw lines of pipes and dashes. The plugin also restores
+// strikethrough, task lists and bare-URL autolinking.
 import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import type { ComponentProps } from 'react'
 
 const COMPONENTS: ComponentProps<typeof ReactMarkdown>['components'] = {
@@ -49,14 +58,23 @@ const COMPONENTS: ComponentProps<typeof ReactMarkdown>['components'] = {
     <pre className="my-2 overflow-x-auto rounded-xl border border-border-subtle bg-bg-raised p-3">{children}</pre>
   ),
   table: ({ children }) => (
-    <div className="my-2 overflow-x-auto">
-      <table className="border-collapse text-[0.9em]">{children}</table>
+    <div className="my-3 max-w-full overflow-x-auto rounded-xl border border-border-subtle">
+      <table className="w-full border-collapse text-left text-[0.9em]">{children}</table>
     </div>
   ),
-  th: ({ children }) => <th className="border border-border px-2 py-1 text-left font-semibold">{children}</th>,
-  td: ({ children }) => <td className="border border-border px-2 py-1">{children}</td>,
+  thead: ({ children }) => <thead className="bg-bg-raised">{children}</thead>,
+  tr: ({ children }) => <tr className="border-b border-border-subtle last:border-b-0">{children}</tr>,
+  th: ({ children }) => (
+    <th className="whitespace-nowrap px-3 py-2 text-left font-semibold text-fg">{children}</th>
+  ),
+  td: ({ children }) => <td className="px-3 py-2 align-top">{children}</td>,
+  del: ({ children }) => <del className="text-muted line-through">{children}</del>,
 }
 
 export function Markdown({ text }: { text: string }) {
-  return <ReactMarkdown components={COMPONENTS}>{text}</ReactMarkdown>
+  return (
+    <ReactMarkdown remarkPlugins={[remarkGfm]} components={COMPONENTS}>
+      {text}
+    </ReactMarkdown>
+  )
 }
