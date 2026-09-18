@@ -12,8 +12,8 @@
 // dispatch already uses (POST /api/<namespace>/<method> with a JSON `args`
 // body, never a path param).
 import { randomUUID } from 'node:crypto'
-import { mkdir, readdir, rm, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { join, relative, resolve, sep } from 'node:path'
 import { tmpdir } from 'node:os'
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
@@ -559,6 +559,46 @@ export function apply(ctx: Context): void {
     },
   })
 
+  // The chat's own working directory, readable from the UI. Until now nothing
+  // outside the agent could see it: the model writes a file, says where it put
+  // it, and the user has no way to open it. `workspace-files` lists,
+  // `workspace-file` serves one. Both resolve the directory from the session
+  // itself, never from the request, and refuse any path that leaves it.
+  registerRoute(ctx, '/workspace-files', {
+    GET: async (request) => {
+      const id = new URL(request.url).searchParams.get('id')
+      if (id === null) return badRequest('missing id')
+      const agent = await resolveAgent(ctx, SessionId(id))
+      const cwd = agent?.session.header.cwd
+      if (cwd === undefined) return notFoundResponse(`session ${id} has no working directory`)
+      return json({ files: await listWorkspace(cwd) })
+    },
+  })
+
+  registerRoute(ctx, '/workspace-file', {
+    GET: async (request) => {
+      const url = new URL(request.url)
+      const id = url.searchParams.get('id')
+      const path = url.searchParams.get('path')
+      if (id === null || path === null) return badRequest('id and path are required')
+      const agent = await resolveAgent(ctx, SessionId(id))
+      const cwd = agent?.session.header.cwd
+      if (cwd === undefined) return notFoundResponse(`session ${id} has no working directory`)
+      const absolute = insideWorkspace(cwd, path)
+      if (absolute === undefined) return badRequest('path leaves the working directory')
+      const body = await readFile(absolute).catch(() => undefined)
+      if (body === undefined) return notFoundResponse(`no file ${path}`)
+      const dot = path.lastIndexOf('.')
+      const type = dot === -1 ? undefined : PREVIEWABLE[path.slice(dot).toLowerCase()]
+      return new Response(new Uint8Array(body), {
+        headers: {
+          'content-type': type ?? 'application/octet-stream',
+          'content-disposition': `${type === undefined ? 'attachment' : 'inline'}; filename="${path.split('/').pop() ?? 'file'}"`,
+        },
+      })
+    },
+  })
+
   registerRoute(ctx, '/session-approvals', {
     GET: async (request) => {
       const url = new URL(request.url)
@@ -636,6 +676,43 @@ function registerApprovalAnswerer(ctx: Context): void {
       }, { once: true })
     })
   })
+}
+
+/** How many files one workspace listing returns; a runaway output directory must not become a runaway response. */
+const MAX_WORKSPACE_FILES = 200
+/** Content types worth naming so the browser can show the file instead of only downloading it. */
+const PREVIEWABLE: Record<string, string> = {
+  '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp',
+  '.svg': 'image/svg+xml', '.pdf': 'application/pdf',
+  '.txt': 'text/plain; charset=utf-8', '.md': 'text/plain; charset=utf-8', '.csv': 'text/plain; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+}
+
+/** Every file under a session's working directory, newest first, dot-entries skipped. */
+async function listWorkspace(cwd: string): Promise<Array<{ path: string; size: number; modified: number }>> {
+  const found: Array<{ path: string; size: number; modified: number }> = []
+  const walk = async (dir: string): Promise<void> => {
+    const entries = await readdir(join(cwd, dir), { withFileTypes: true }).catch(() => [])
+    for (const entry of entries) {
+      if (entry.name.startsWith('.') || found.length >= MAX_WORKSPACE_FILES) continue
+      const path = dir === '' ? entry.name : `${dir}/${entry.name}`
+      if (entry.isDirectory()) await walk(path)
+      else if (entry.isFile()) {
+        const info = await stat(join(cwd, path)).catch(() => undefined)
+        if (info !== undefined) found.push({ path, size: info.size, modified: info.mtimeMs })
+      }
+    }
+  }
+  await walk('')
+  return found.sort((a, b) => b.modified - a.modified)
+}
+
+/** The absolute path of `path` inside `cwd`, or undefined when it escapes — the only guard between a query string and the host filesystem. */
+function insideWorkspace(cwd: string, path: string): string | undefined {
+  const absolute = resolve(cwd, path)
+  const rel = relative(cwd, absolute)
+  if (rel === '' || rel.startsWith('..') || rel.startsWith(`..${sep}`) || resolve(cwd, rel) !== absolute) return undefined
+  return absolute
 }
 
 function registerRoute(ctx: Context, path: string, handlers: Partial<Record<Method, Handler>>): void {
