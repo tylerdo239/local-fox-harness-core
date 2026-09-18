@@ -293,6 +293,34 @@
 - id: tool-jobs
   disabled: false
 
+# Enabled after booting every off-by-default dsh row in a throwaway instance and
+# driving each one by chat, rather than reading their descriptions and guessing.
+# These three worked: the model laid out a five-step task with `todo_write` and
+# moved each item pending -> in_progress -> completed as it went, and
+# create_goal/get_goal answered cleanly. Cost is 297 tokens of tool descriptions,
+# under 1% of the 32 K window.
+#
+# `todo_write` has a hidden cost worth knowing: the model re-sends the WHOLE list
+# on every update, so that five-step task took six calls, roughly 770 tokens of
+# churn. Worth it on long work, wasteful on short.
+#
+# Three others in that same test are deliberately left off:
+#   - tool-workflow: the model wrote an invalid script three times running
+#     ("Cannot use import statement outside a module", "require is not defined",
+#     a null from the workflow globals), gave up and did the job in bash. Its 201
+#     tokens buy nothing without the scripting docs dsh teaches it from elsewhere.
+#   - agent-instructions: activates, but has no effect. An AGENTS.md placed in the
+#     session's own cwd (tried with and without a .git marker) carrying a rule
+#     trivial to check was ignored. It reads `sessionProjections.stateOf`, so the
+#     gateway in this app most likely never emits the projection it waits on.
+#   - skill-badge: renders in dsh's own GUI, which apps/web replaced.
+- id: tool-todo
+  disabled: false
+- id: tool-goal
+  disabled: false
+- id: command-goal
+  disabled: false
+
 # Tool output is what fills a context window once the three rows above exist:
 # this trims anything past 8 KB to its head and tail in the model-visible copy,
 # leaving the full text in the session log. Found independently on 2 sides of
