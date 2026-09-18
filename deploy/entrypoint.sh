@@ -24,6 +24,14 @@ DSH_BIN="$REPO_ROOT/node_modules/.bin/dsh"
 export CORDIS_BUNDLED_SKILL_DIR="${CORDIS_BUNDLED_SKILL_DIR:-$REPO_ROOT/packages/skills}"
 
 mkdir -p "$PROFILE_DIR"
+# The user-skill root, created here rather than by the first skill written into
+# it. dsh-skill-filesystem attaches its watcher at boot; measured on a fresh
+# deploy, the very first skill created through the API landed on disk but stayed
+# invisible to ctx.skills.list() — /skill-content said "not found", edit said "no
+# editable skill", and the duplicate-name guard (which reads the same list) let
+# the same name be created twice. Later skills appeared in 27ms. The difference
+# was this directory not existing when the watcher went looking.
+mkdir -p "$DSH_HOME/skills"
 
 # package.json is regenerated every start: the bundle list is composition
 # (rebuild-tier), and every *_DIR's absolute path can change across images.
