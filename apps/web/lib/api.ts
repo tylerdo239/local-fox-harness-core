@@ -216,10 +216,29 @@ export function deleteSkill(name: string): Promise<{ ok: true }> {
   return request('/skill-delete', { method: 'POST', body: JSON.stringify({ name }) })
 }
 
+export function interruptSession(sessionId: string): Promise<{ ok: true }> {
+  return request('/session-interrupt', { method: 'POST', body: JSON.stringify({ sessionId }) })
+}
+
 export function login(username: string, password: string): Promise<{ redirectUrl: string }> {
   return request('/auth/login', { method: 'POST', body: JSON.stringify({ username, password }) })
 }
 
 export function logout(): Promise<{ ok: true }> {
   return request('/auth/logout', { method: 'POST' })
+}
+
+export interface WorkspaceFile {
+  readonly path: string
+  readonly size: number
+  readonly modified: number
+}
+
+export function listWorkspaceFiles(sessionId: string): Promise<{ files: WorkspaceFile[] }> {
+  return request(`/workspace-files?id=${encodeURIComponent(sessionId)}`)
+}
+
+/** Same-origin URL the browser opens directly — the file is bytes, not JSON, so it never goes through `request`. */
+export function workspaceFileUrl(sessionId: string, path: string): string {
+  return `/api/v1/workspace-file?id=${encodeURIComponent(sessionId)}&path=${encodeURIComponent(path)}`
 }

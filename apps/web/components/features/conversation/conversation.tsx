@@ -23,7 +23,7 @@
 //   THIS app (dsh-user-approval) that example-2 has no equivalent of at
 //   all — kept, not removed to match.
 import { useMemo, useState, type ReactNode } from 'react'
-import { ChevronDown, Wrench } from 'lucide-react'
+import { ChevronDown, Sparkles, Wrench } from 'lucide-react'
 import type { SessionEvent } from '../../../lib/api'
 import { useLocale } from '../../../lib/i18n/locale'
 import type { TranslationKey } from '../../../lib/i18n/translations'
@@ -113,7 +113,7 @@ export function hasRealUserMessage(events: SessionEvent[]): boolean {
 
 type LogEntry =
   | { kind: 'notice'; id: string; text: string }
-  | { kind: 'tool'; id: string; name: string; args: string; status: 'running' | 'done' | 'error'; resultText: string | null }
+  | { kind: 'tool'; id: string; name: string; skill?: string; args: string; status: 'running' | 'done' | 'error'; resultText: string | null }
   | { kind: 'bubble'; id: string; role: string; text: string }
 
 function buildEntries(events: SessionEvent[]): LogEntry[] {
@@ -168,9 +168,16 @@ function buildEntries(events: SessionEvent[]): LogEntry[] {
         const data = event.data as { callId?: string; name?: string; arguments?: string }
         if (typeof data.callId !== 'string' || typeof data.name !== 'string') break
         let pretty = data.arguments ?? ''
-        try { pretty = JSON.stringify(JSON.parse(pretty), null, 2) } catch { /* not JSON — show raw */ }
+        let skill: string | undefined
+        try {
+          const parsed = JSON.parse(pretty) as { name?: unknown }
+          pretty = JSON.stringify(parsed, null, 2)
+          // Loading a skill is not "using a tool" to the person reading along — it is the agent
+          // picking up a way of working, and which one it picked is the part worth showing.
+          if (data.name === 'skill' && typeof parsed.name === 'string') skill = parsed.name
+        } catch { /* not JSON — show raw */ }
         toolIndexByCallId.set(data.callId, entries.length)
-        entries.push({ kind: 'tool', id: `tool-${data.callId}`, name: data.name, args: pretty, status: 'running', resultText: null })
+        entries.push({ kind: 'tool', id: `tool-${data.callId}`, name: data.name, ...(skill === undefined ? {} : { skill }), args: pretty, status: 'running', resultText: null })
         break
       }
       case 'tool/result': {
@@ -186,10 +193,14 @@ function buildEntries(events: SessionEvent[]): LogEntry[] {
           .map(b => b.text)
           .join('\n')
         const isError = data.error !== undefined || block.isError === true
+        // The pill no longer announces failures (see ToolPill), so the expanded
+        // body is now the only place an error is readable — it has to carry the
+        // message the model got, not just the error's class name.
+        const errorText = blockText !== '' ? blockText : (data.error?.name ?? '')
         entries[index] = {
           ...entry,
           status: isError ? 'error' : 'done',
-          resultText: isError ? (data.error?.name ?? blockText) : truncate(blockText, 500),
+          resultText: truncate(isError ? errorText : blockText, 500),
         }
         break
       }
@@ -229,19 +240,38 @@ function ToolPill({
   onToggle: () => void
   t: (key: TranslationKey, params?: Record<string, string>) => string
 }) {
-  const label = entry.status === 'running'
-    ? t('conversation.toolRunning', { name: entry.name })
-    : entry.status === 'error'
-      ? t('conversation.toolFailed', { name: entry.name })
+  const skill = entry.skill
+  // A failed tool call is not surfaced as a failure. Verified on this
+  // deployment before hiding anything, because the whole point is that the
+  // error still reaches the MODEL intact: a `read` of a missing path comes back
+  // as `Error: cannot read "...": not found` with `isError` set, a failing
+  // command comes back with its stderr and `[exit code: 1]`, and in both cases
+  // the loop continues and the model repairs or reports honestly in its own
+  // answer. What the red pill added on top was a second, alarming copy of
+  // something already handled — so the wording stays neutral and the full error
+  // text stays one click away, in the expanded body below.
+  //
+  // Skills are the exception: "skill X loaded" would be a false statement about
+  // what the agent actually knows, so a failed skill load still says so.
+  const failed = entry.status === 'error'
+  const label = skill !== undefined
+    ? entry.status === 'running'
+      ? t('conversation.skillLoading', { name: skill })
+      : failed
+        ? t('conversation.skillFailed', { name: skill })
+        : t('conversation.skillLoaded', { name: skill })
+    : entry.status === 'running'
+      ? t('conversation.toolRunning', { name: entry.name })
       : t('conversation.toolUsed', { name: entry.name })
+  const alarming = failed && skill !== undefined
   return (
     <div className="max-w-[85%] self-start overflow-hidden rounded-xl border border-border-subtle bg-bg-raised text-[0.85em]">
       <button
         type="button"
-        className={`flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-bg-hover ${entry.status === 'error' ? 'text-error' : 'text-muted'}`}
+        className={`flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-bg-hover ${alarming ? 'text-error' : 'text-muted'}`}
         onClick={onToggle}
       >
-        <Wrench size={13} className="flex-none" />
+        {skill !== undefined ? <Sparkles size={13} className="flex-none" /> : <Wrench size={13} className="flex-none" />}
         <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">{label}</span>
         <ChevronDown size={13} className={`ml-auto flex-none transition-transform duration-100 ease-fh ${expanded ? 'rotate-180' : ''}`} />
       </button>
@@ -301,4 +331,41 @@ export function Conversation({ events }: { events: SessionEvent[] }) {
       ))}
     </div>
   )
+}
+
+/**
+ * Is a turn in flight, since when, and on which tool — read from the same event stream the log is
+ * built from, so it can never disagree with what is on screen. `turn/start` opens it, `turn/end`
+ * closes it; a `tool/call` with no matching `tool/result` yet names the step.
+ */
+export function runningState(events: SessionEvent[]): { running: boolean; since: number; tool?: string; skill?: string } {
+  let running = false
+  let since = 0
+  let tool: string | undefined
+  let skill: string | undefined
+  const openCalls = new Map<string, { name: string; skill?: string }>()
+  for (const event of events) {
+    if (event.type === 'turn/start') { running = true; since = event.time; openCalls.clear(); tool = undefined; skill = undefined }
+    else if (event.type === 'turn/end') { running = false; tool = undefined; skill = undefined; openCalls.clear() }
+    else if (event.type === 'tool/call') {
+      const data = event.data as { callId?: string; name?: string; arguments?: string }
+      if (typeof data.callId !== 'string' || typeof data.name !== 'string') continue
+      let loaded: string | undefined
+      try {
+        const parsed = JSON.parse(data.arguments ?? '') as { name?: unknown }
+        if (data.name === 'skill' && typeof parsed.name === 'string') loaded = parsed.name
+      } catch { /* not JSON */ }
+      openCalls.set(data.callId, { name: data.name, ...(loaded === undefined ? {} : { skill: loaded }) })
+      tool = data.name
+      skill = loaded
+    } else if (event.type === 'tool/result') {
+      const data = event.data as { message?: { content?: [{ toolCallId?: string }] } }
+      const callId = data.message?.content?.[0]?.toolCallId
+      if (typeof callId === 'string') openCalls.delete(callId)
+      const still = [...openCalls.values()].pop()
+      tool = still?.name
+      skill = still?.skill
+    }
+  }
+  return { running, since, ...(tool === undefined ? {} : { tool }), ...(skill === undefined ? {} : { skill }) }
 }

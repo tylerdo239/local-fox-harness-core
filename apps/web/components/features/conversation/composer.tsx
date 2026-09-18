@@ -32,9 +32,12 @@
 // example-2's own separate skillsApi.ts pub/sub cache — this app already
 // has one shared cache mechanism, no need for a second.
 import { useEffect, useRef, useState } from 'react'
+import { Square } from 'lucide-react'
 import { useMutation, useQuery } from '@tanstack/react-query'
-import { listSkills, sendMessage, type SkillSummary } from '../../../lib/api'
+import { listSkills, sendMessage, type SkillSummary, interruptSession } from '../../../lib/api'
 import { useChatStore } from '../../../lib/store'
+import { runningState } from './conversation'
+import { RunStatus } from './run-status'
 import { useLocale } from '../../../lib/i18n/locale'
 import { Button } from '../../primitives/button'
 
@@ -93,10 +96,14 @@ export function Composer({ sessionId, large = false }: { sessionId: string; larg
   const [menuIndex, setMenuIndex] = useState(0)
   const [menuDismissedFor, setMenuDismissedFor] = useState<string | undefined>(undefined)
 
+  const events = useChatStore(state => state.events)
+  const run = runningState(events)
+
   const send = useMutation({
     mutationFn: (text: string) => sendMessage(sessionId, text),
     onSuccess: () => { setComposerText('') },
   })
+  const stop = useMutation({ mutationFn: () => interruptSession(sessionId) })
 
   const slash = slashQuery(composerText)
   const menuItems = slash === undefined || menuDismissedFor === composerText
@@ -172,10 +179,22 @@ export function Composer({ sessionId, large = false }: { sessionId: string; larg
           }
         }}
       />
-      <div className="flex items-center justify-end gap-2">
-        <Button variant="primary" disabled={send.isPending} onClick={submit}>
-          {t('conversation.send')}
-        </Button>
+      <div className="flex items-center gap-2">
+        <RunStatus run={run} />
+        <div className="ml-auto flex items-center gap-2">
+        {run.running ? (
+          // One reply at a time: while a turn is in flight the same seat is Stop, so the person
+          // never has to wonder whether anything is happening or how to make it stop.
+          <Button variant="outline" disabled={stop.isPending} onClick={() => { stop.mutate() }}>
+            <Square size={13} fill="currentColor" />
+            {t('conversation.stop')}
+          </Button>
+        ) : (
+          <Button variant="primary" disabled={send.isPending} onClick={submit}>
+            {t('conversation.send')}
+          </Button>
+        )}
+        </div>
       </div>
       {send.isError ? <p className="text-xs text-error">{(send.error as Error).message}</p> : null}
     </div>
