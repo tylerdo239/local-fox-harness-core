@@ -1,0 +1,252 @@
+// UI clone plan Phase G — own translation table, NOT copied from example-2's
+// (different app, different strings: no register/email/projects/skill-menu/
+// data-analysis text here yet — skills.* gets added in Phase H once
+// SkillsDialog exists). Mechanism ported from their locale.tsx/translations.ts;
+// wording written fresh against this app's actual components.
+//
+// `en` is typed `Record<TranslationKey, string>` — a real compile-time
+// guarantee: add a key to `vi` and miss it in `en`, `tsc` fails immediately.
+
+export type Locale = 'vi' | 'en'
+
+export const vi = {
+  // login-form.tsx
+  'login.title': 'Fox Harness',
+  'login.subtitle': 'Đăng nhập để tiếp tục',
+  'login.username': 'Tên đăng nhập',
+  'login.password': 'Mật khẩu',
+  'login.pleaseWait': 'Vui lòng đợi…',
+  'login.submit': 'Đăng nhập',
+
+  // theme-toggle.tsx
+  'theme.switchToDark': 'Chuyển sang giao diện tối',
+  'theme.switchToLight': 'Chuyển sang giao diện sáng',
+
+  // language-select.tsx
+  'language.label': 'Ngôn ngữ',
+
+  // sidebar.tsx / page.tsx EmptyState
+  'sidebar.expand': 'Mở rộng thanh bên',
+  'sidebar.collapse': 'Thu gọn thanh bên',
+  'sidebar.newChat': 'Trò chuyện mới',
+  'sidebar.newChatDisabled': 'Đoạn chat này còn trống — gõ tin nhắn đầu tiên trước khi tạo đoạn mới',
+  'sidebar.skills': 'Kỹ năng',
+  'sidebar.search': 'Tìm kiếm',
+  'sidebar.searchPlaceholder': 'Tìm kiếm trò chuyện…',
+
+  // history-chat.tsx (Đợt 2 Phase I)
+  'historyChat.untitled': 'Chưa đặt tên — {id}',
+  'historyChat.groupToday': 'Hôm nay',
+  'historyChat.groupYesterday': 'Hôm qua',
+  'historyChat.group7d': '7 ngày trước',
+  'historyChat.group30d': '30 ngày trước',
+  'historyChat.groupOlder': 'Cũ hơn',
+  'historyChat.rowActions': 'Tuỳ chọn',
+  'historyChat.rename': 'Đổi tên',
+  'historyChat.delete': 'Xoá',
+  'historyChat.deleteConfirm': 'Xoá cuộc trò chuyện này? Không thể hoàn tác.',
+
+  // account-menu.tsx
+  'account.menuTitle': 'Menu tài khoản',
+  'account.name': 'Admin',
+  'account.settings': 'Cài đặt',
+  'account.logout': 'Đăng xuất',
+
+  // settings-dialog.tsx
+  'settings.title': 'Cài đặt',
+  'settings.generalTab': 'Cài đặt',
+  'settings.configTab': 'Config',
+  'settings.configFieldConfigured': 'Đã cấu hình.',
+  'settings.configFieldNotConfigured': 'Chưa cấu hình.',
+  'settings.webSearchTitle': 'Serper API key',
+  'settings.webSearchHint': 'Dùng cho tool web_search của agent. Lấy key miễn phí tại',
+  'settings.webSearchPlaceholder': 'dán Serper API key…',
+  'settings.n8nApiKeyTitle': 'n8n API key',
+  'settings.n8nApiKeyHint': 'Dùng để agent tạo/quản lý workflow n8n. Tạo trong n8n: Settings → API.',
+  'settings.n8nApiKeyPlaceholder': 'dán n8n API key…',
+  'settings.n8nWebhookSecretTitle': 'n8n webhook secret',
+  'settings.n8nWebhookSecretHint': 'Chuỗi bí mật workflow n8n phải gửi kèm khi gọi vào agent — tự chọn 1 chuỗi bất kỳ.',
+  'settings.n8nWebhookSecretPlaceholder': 'đặt 1 chuỗi bí mật…',
+  'settings.accountTab': 'Tài khoản',
+  'settings.theme': 'Giao diện',
+  'settings.themeLight': 'Sáng',
+  'settings.themeDark': 'Tối',
+  'settings.changePassword': 'Đổi mật khẩu admin',
+  'settings.newPasswordPlaceholder': 'mật khẩu mới…',
+  'settings.savePassword': 'Lưu mật khẩu mới',
+  'settings.passwordUpdated': 'Đã cập nhật mật khẩu.',
+  'settings.logout': 'Đăng xuất',
+
+  // settings-dialog.tsx's WebSearchTab (shared with the removed
+  // settings-models.tsx tab — Đợt 6 — so this key stays even though its
+  // former owner is gone)
+  'models.remove': 'Xoá',
+
+  // automations.tsx
+  'automations.title': 'Automations',
+  'automations.readonlyHint': 'Tất cả n8n workflow trong instance này. Trang này chỉ để xem — hãy nhờ agent trong khung chat để tạo, sửa, kích hoạt hoặc chạy workflow.',
+  'automations.loading': 'Đang tải…',
+  'automations.empty': 'Chưa có workflow nào trong n8n.',
+  'automations.active': 'đang bật',
+  'automations.inactive': 'đang tắt',
+  'automations.openInN8n': 'Mở trong n8n',
+  'automations.recentExecutions': 'Lần chạy gần đây',
+  'automations.noExecutions': 'Chưa có lần chạy nào.',
+
+  // conversation.tsx / composer.tsx
+  'conversation.emptyHeading': 'Bắt đầu cuộc trò chuyện',
+  'conversation.placeholder': 'Nhắn cho agent…',
+  'conversation.send': 'Gửi',
+  'conversation.toolRunning': 'Đang dùng {name}…',
+  'conversation.toolUsed': 'Đã dùng {name}',
+  'conversation.toolFailed': 'Lỗi khi dùng {name}',
+  'conversation.turnEnded': 'Lượt kết thúc: {reason}',
+
+  // approvals.tsx
+  'approvals.approve': 'Duyệt',
+  'approvals.allow': 'Cho phép',
+  'approvals.reject': 'Từ chối',
+
+  // skills-dialog.tsx
+  'skills.title': 'Kỹ năng',
+  'skills.empty': 'Chưa có kỹ năng nào được đăng ký.',
+  'skills.loading': 'Đang tải…',
+  'skills.selectHint': 'Chọn một kỹ năng ở bên trái để xem chi tiết.',
+  'skills.whenToUse': 'Khi nào dùng',
+  'skills.source': 'Nguồn',
+  'skills.provider': 'Provider',
+  'skills.modelInvocable': 'Model có thể tự gọi',
+  'skills.userInvocable': 'Người dùng có thể gọi',
+  'skills.yes': 'Có',
+  'skills.no': 'Không',
+  'skills.new': 'Tạo skill mới',
+  'skills.mine': 'Skill của tôi',
+  'skills.mineBadge': 'của tôi',
+  'skills.emptyMine': 'Chưa có skill nào',
+  'skills.builtin': 'Skill có sẵn',
+  'skills.builtinReadonly': 'Skill có sẵn dùng chung, không sửa được. Gõ /{name} trong ô chat để dùng.',
+  'skills.name': 'Tên',
+  'skills.namePlaceholder': 'vd. bao-cao-tuan',
+  'skills.nameHint': 'Chữ thường, số, gạch ngang. Không đổi được sau khi tạo. Gõ /tên trong ô chat để dùng.',
+  'skills.description': 'Mô tả — dùng khi nào',
+  'skills.content': 'Nội dung',
+  'skills.save': 'Lưu',
+  'skills.saving': 'Đang lưu…',
+  'skills.delete': 'Xoá',
+  'skills.deleteConfirm': 'Xoá skill "{name}"? Không thể hoàn tác.',
+} as const
+
+export type TranslationKey = keyof typeof vi
+
+export const en: Record<TranslationKey, string> = {
+  'login.title': 'Fox Harness',
+  'login.subtitle': 'Sign in to continue',
+  'login.username': 'Username',
+  'login.password': 'Password',
+  'login.pleaseWait': 'Please wait…',
+  'login.submit': 'Log in',
+
+  'theme.switchToDark': 'Switch to dark theme',
+  'theme.switchToLight': 'Switch to light theme',
+
+  'language.label': 'Language',
+
+  'sidebar.expand': 'Expand sidebar',
+  'sidebar.collapse': 'Collapse sidebar',
+  'sidebar.newChat': 'New chat',
+  'sidebar.newChatDisabled': 'This chat is still empty — send a first message before starting another one',
+  'sidebar.skills': 'Skills',
+  'sidebar.search': 'Search',
+  'sidebar.searchPlaceholder': 'Search chats…',
+
+  'historyChat.untitled': 'Untitled — {id}',
+  'historyChat.groupToday': 'Today',
+  'historyChat.groupYesterday': 'Yesterday',
+  'historyChat.group7d': 'Previous 7 Days',
+  'historyChat.group30d': 'Previous 30 Days',
+  'historyChat.groupOlder': 'Older',
+  'historyChat.rowActions': 'Options',
+  'historyChat.rename': 'Rename',
+  'historyChat.delete': 'Delete',
+  'historyChat.deleteConfirm': 'Delete this chat? This cannot be undone.',
+
+  'account.menuTitle': 'Account menu',
+  'account.name': 'Admin',
+  'account.settings': 'Settings',
+  'account.logout': 'Log out',
+
+  'settings.title': 'Settings',
+  'settings.generalTab': 'General',
+  'settings.configTab': 'Config',
+  'settings.configFieldConfigured': 'Configured.',
+  'settings.configFieldNotConfigured': 'Not configured.',
+  'settings.webSearchTitle': 'Serper API key',
+  'settings.webSearchHint': "Used for the agent's web_search tool. Get a free key at",
+  'settings.webSearchPlaceholder': 'paste your Serper API key…',
+  'settings.n8nApiKeyTitle': 'n8n API key',
+  'settings.n8nApiKeyHint': "Used for the agent to create/manage n8n workflows. Create one in n8n: Settings → API.",
+  'settings.n8nApiKeyPlaceholder': 'paste your n8n API key…',
+  'settings.n8nWebhookSecretTitle': 'n8n webhook secret',
+  'settings.n8nWebhookSecretHint': "Secret string n8n workflows must send when calling into the agent — pick any string.",
+  'settings.n8nWebhookSecretPlaceholder': 'set a secret string…',
+  'settings.accountTab': 'Account',
+  'settings.theme': 'Theme',
+  'settings.themeLight': 'Light',
+  'settings.themeDark': 'Dark',
+  'settings.changePassword': 'Change admin password',
+  'settings.newPasswordPlaceholder': 'new password…',
+  'settings.savePassword': 'Save new password',
+  'settings.passwordUpdated': 'Password updated.',
+  'settings.logout': 'Log out',
+
+  'models.remove': 'Remove',
+
+  'automations.title': 'Automations',
+  'automations.readonlyHint': 'All n8n workflows in this instance. This page is read-only — ask the agent in chat to create, edit, activate, or run a workflow.',
+  'automations.loading': 'Loading…',
+  'automations.empty': 'No workflows in n8n yet.',
+  'automations.active': 'active',
+  'automations.inactive': 'inactive',
+  'automations.openInN8n': 'Open in n8n',
+  'automations.recentExecutions': 'Recent executions',
+  'automations.noExecutions': 'No executions yet.',
+
+  'conversation.emptyHeading': 'Start a conversation',
+  'conversation.placeholder': 'Message the agent…',
+  'conversation.send': 'Send',
+  'conversation.toolRunning': 'Using {name}…',
+  'conversation.toolUsed': 'Used {name}',
+  'conversation.toolFailed': 'Failed to use {name}',
+  'conversation.turnEnded': 'Turn ended: {reason}',
+
+  'approvals.approve': 'Approve',
+  'approvals.allow': 'Allow',
+  'approvals.reject': 'Reject',
+
+  'skills.title': 'Skills',
+  'skills.empty': 'No skills registered yet.',
+  'skills.loading': 'Loading…',
+  'skills.selectHint': 'Select a skill on the left to see its details.',
+  'skills.whenToUse': 'When to use',
+  'skills.source': 'Source',
+  'skills.provider': 'Provider',
+  'skills.modelInvocable': 'Model can call it',
+  'skills.userInvocable': 'User can invoke it',
+  'skills.yes': 'Yes',
+  'skills.no': 'No',
+  'skills.new': 'New skill',
+  'skills.mine': 'My skills',
+  'skills.mineBadge': 'mine',
+  'skills.emptyMine': 'No skills yet',
+  'skills.builtin': 'Built-in skills',
+  'skills.builtinReadonly': "Built-in skills are shared and can't be edited. Type /{name} in the chat to use it.",
+  'skills.name': 'Name',
+  'skills.namePlaceholder': 'e.g. weekly-report',
+  'skills.nameHint': "Lowercase letters, digits, hyphens. Can't be changed later. Type /name in the chat to use it.",
+  'skills.description': 'Description — when to use it',
+  'skills.content': 'Content',
+  'skills.save': 'Save',
+  'skills.saving': 'Saving…',
+  'skills.delete': 'Delete',
+  'skills.deleteConfirm': 'Delete skill "{name}"? This cannot be undone.',
+}

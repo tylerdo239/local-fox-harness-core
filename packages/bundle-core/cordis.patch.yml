@@ -156,8 +156,88 @@
   name: '@deepseek-ai/dsh-api-remotes'
   disabled: true
 
+# Cloned per user request (docs/cordis-ui-clone-plan.md's "clone plugin"
+# ask): re-enable dsh-base's own `tool-web`/`web` rows for real web search.
+# `tool-web` (the model-facing `web_search` tool) arrives `disabled: true`
+# from dsh-web-app's own patch layer (pre-existing, unrelated to this
+# change — confirmed via a real `dsh --profile cordis-app --dump-config`
+# run) — without re-enabling it the model has no tool to call at all, even
+# with a search source registered below. A patch replaces a row's WHOLE
+# `config`, so every key the row owns is restated here, not just the one
+# being changed (same convention dsh-web-app's own patch.yml documents).
+- id: tool-web
+  name: '@deepseek-ai/dsh-tool-web'
+  config:
+    fetch: true
+    searchTimeoutMs: 60000
+  disabled: false
+- id: web
+  name: '@deepseek-ai/dsh-web'
+  config:
+    searchProvider: serper
+    fetchProvider: http
+
+# Real bug reported: chat in Vietnamese, agent replies in English. Root
+# cause found — dsh-web-app's own default persona (personaPrefix/Suffix
+# below, confirmed via a real --dump-config) is entirely in English with no
+# instruction at all about matching the user's language, so a model with no
+# strong language-consistency prior of its own defaults to English. A patch
+# entry replaces the WHOLE row config, so personaPrefix is restated
+# unchanged — only personaSuffix gains the new sentence.
+- id: system-prompt
+  name: '@deepseek-ai/dsh-system-prompt'
+  config:
+    personaPrefix: You are a coding agent powered by the {{model}} model.
+    personaSuffix: >-
+      Your working directory is {{cwd}}. Always reply in the same language
+      the user's message is written in — match it exactly (e.g. Vietnamese
+      in, Vietnamese out; English in, English out), even if it changes
+      mid-conversation, regardless of what language your own reasoning or
+      tool calls use internally.
+
+# Built-in skills (packages/skills, cloned from example-2 — verbatim, no
+# fox-harness-specific content) plus the real "user-dsh" root
+# ($DSH_HOME/skills, source of anything the create_skill tool writes).
+# NOT a pure add — real boot error caught the hard way confirmed dsh-base
+# ALREADY has this row (`disabled: true`, patched by dsh-web-app, same
+# family as the tool-web/web rows above) — a plain `insert:` for the same
+# id threw "duplicate loader entry id: skill-filesystem" at real boot.
+# Overriding it here instead (`disabled: false` + `bundledSkillDir`) is what
+# actually turns on the empty `{"skills":[]}` real API response seen before
+# this row existed. `includeDefaultRoots` (default true, left unset here) is
+# what also turns on the $DSH_HOME/skills user root — confirmed by reading
+# the package's own compiled source, not assumed.
+- id: skill-filesystem
+  name: '@deepseek-ai/dsh-skill-filesystem'
+  config:
+    bundledSkillDir: !!js process.env.CORDIS_BUNDLED_SKILL_DIR
+  disabled: false
+
+# Real, bigger gap found while testing the new "/" skill picker (Đợt 17):
+# @deepseek-ai/dsh-tool-skill — the package that (a) surfaces the skill
+# catalog + a `skill` load tool to the MODEL, and (b) implements the real
+# `/name` user-gesture the composer's new picker exists to type — was ALSO
+# disabled by dsh-web-app's own default, same family as tool-web/
+# skill-filesystem above. Confirmed for real: sending "/web-research ..."
+# never injected the skill's content at all (no extra user/message event),
+# the model just treated it as plain text and called web_search directly.
+# The whole skill CRUD system (Đợt 5) has been fully wired end-to-end on
+# the STORAGE/UI side this whole time, but the model itself could never
+# actually consume a skill — neither voluntarily nor via /name — until now.
+- id: tool-skill
+  name: '@deepseek-ai/dsh-tool-skill'
+  disabled: false
+
+# cordis-llm-openai-compat, cordis-tool-serper-web-search, cordis-tool-n8n,
+# and cordis-tool-create-skill moved out to their own packages (each with its
+# own cordis.patch.yml) — inserted via the profile's `dsh.profile.bundles`
+# array (deploy/entrypoint.sh), not from here anymore.
 - insert:
     - id: cordis-ui
       name: '@cordis-app/bundle-core/ui'
+    - id: cordis-auth
+      name: '@cordis-app/bundle-core/auth'
     - id: cordis-gateway
       name: '@cordis-app/bundle-core/gateway'
+    - id: cordis-audit
+      name: '@cordis-app/bundle-core/audit'

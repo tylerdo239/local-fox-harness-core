@@ -8,7 +8,9 @@
   "exports": {
     ".": "./lib/index.js",
     "./ui": "./lib/ui.js",
+    "./auth": "./lib/auth.js",
     "./gateway": "./lib/gateway.js",
+    "./audit": "./lib/audit.js",
     "./package.json": "./package.json"
   },
   "dsh": {

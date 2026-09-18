@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { listApprovals, streamUrl, type SessionEvent } from './api'
 import { useChatStore } from './store'
 
@@ -11,11 +12,20 @@ import { useChatStore } from './store'
  * polling). Native EventSource already resends Last-Event-ID on its own
  * automatic reconnect, so cordis-gateway's session-stream route replays
  * exactly the missed suffix — no manual reconnect bookkeeping needed here.
+ *
+ * Real gap found ("khung chat trung tâm ... flow tạo session mới ... chưa
+ * có, check lại và thêm"): dsh-session-title/-llm/-first-prompt-llm append
+ * a log-only `session/title` event once a real title is derived from the
+ * first message — nothing was invalidating the sidebar's `['sessions']`
+ * query cache for it, so a freshly-created chat stayed "Untitled" in
+ * HistoryChat forever unless the whole page was reloaded. Same event-driven
+ * pattern as the existing approval refresh, not polling.
  */
 export function useSessionStream(sessionId: string | undefined): void {
   const addEvent = useChatStore(state => state.addEvent)
   const setConnection = useChatStore(state => state.setConnection)
   const setPendingApprovals = useChatStore(state => state.setPendingApprovals)
+  const queryClient = useQueryClient()
 
   useEffect(() => {
     if (sessionId === undefined) return
@@ -38,6 +48,7 @@ export function useSessionStream(sessionId: string | undefined): void {
       const event = JSON.parse(message.data) as SessionEvent
       addEvent(event)
       if (event.type === 'approval/asked' || event.type === 'approval/decided') refreshApprovals()
+      if (event.type === 'session/title') void queryClient.invalidateQueries({ queryKey: ['sessions'] })
     })
 
     refreshApprovals()
@@ -46,5 +57,5 @@ export function useSessionStream(sessionId: string | undefined): void {
       source.close()
       setConnection('idle')
     }
-  }, [sessionId, addEvent, setConnection, setPendingApprovals])
+  }, [sessionId, addEvent, setConnection, setPendingApprovals, queryClient])
 }

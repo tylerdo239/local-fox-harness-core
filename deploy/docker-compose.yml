@@ -1,7 +1,40 @@
-# Cordis Agent Core — one core service for now (n8n joins in Phase 6, per
-# architecture doc §8.1). Run from the repo root: `docker compose -f
-# deploy/docker-compose.yml up --build`.
+# Cordis Agent Core — core service plus n8n (Phase 6, architecture doc §8.1).
+# Run from the repo root: `docker compose -f deploy/docker-compose.yml up --build`.
+#
+# n8n integration is OFF by default even with this service running: core's
+# own cordis-n8n plugin (packages/tool/n8n/src/index.ts, its own
+# @cordis-app/tool-n8n package) is not part of the shipped composition —
+# insert it plus @deepseek-ai/dsh-webhook (its
+# undeclared runtime dependency, confirmed for real: boot fails
+# "waiting for service: webhookRuntime" without it) via
+# data/harness/profiles/cordis-app/cordis.patch.yml, matching the opt-in
+# pattern from docs/patch-cookbook.md. baseURL then points at
+# `http://n8n:5678` (the service name below, reachable over the compose
+# network — not 127.0.0.1, which only works from the host or from n8n's own
+# container).
 services:
+  n8n:
+    image: docker.n8n.io/n8nio/n8n:latest
+    volumes:
+      - n8n-data:/home/node/.n8n
+    ports:
+      - "127.0.0.1:5678:5678"   # editor UI — loopback only, same posture as `core`
+    environment:
+      # Quiets n8n's own marketing/onboarding surface for a self-hosted,
+      # single-tenant deployment — confirmed for real against a live n8n
+      # 2.38.7 instance (GET /rest/settings before/after): every one of
+      # these actually flips its matching settings field to false, none of
+      # them affect workflow/tool functionality. N8N_TEMPLATES_ENABLED also
+      # removes the templates marketplace panel (a real feature, not just
+      # an ad) — flip it back to true if you want template browsing.
+      N8N_DIAGNOSTICS_ENABLED: "false"            # telemetry + posthog + dynamicBanners (the "buy n8n" upsell banner)
+      N8N_PERSONALIZATION_ENABLED: "false"        # the first-login "tell us about yourself" onboarding survey popup
+      N8N_VERSION_NOTIFICATIONS_ENABLED: "false"  # "update available" popup
+      N8N_VERSION_NOTIFICATIONS_WHATS_NEW_ENABLED: "false"  # separate flag from the line above — confirmed both needed
+      N8N_HIRING_BANNER_ENABLED: "false"
+      N8N_TEMPLATES_ENABLED: "false"
+    restart: unless-stopped
+
   core:
     image: cordis-core:dev
     build:
@@ -24,3 +57,4 @@ services:
 
 volumes:
   workspace:
+  n8n-data:

@@ -1,0 +1,24 @@
+{
+  "name": "@cordis-app/tool-create-skill",
+  "description": "Tool 'create_skill' — lets the model save a new skill from inside a chat, writing $DSH_HOME/skills/<name>/SKILL.md directly (dsh-skill-filesystem's own real user root). Adapted from example-2/packages/tool/create-skill, simplified since this app is single-admin (no per-user browser round-trip needed).",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
+  "comment_dependencies": "Deliberately none here beyond the cordis peer — see packages/llm/openai-compat/package.json's own comment_dependencies for the real prior bug this avoids. @deepseek-ai/dsh-tools, dsh-skill, and dsh-home-paths are all declared once, at the root package.json, and resolve here via plain Node upward directory-walk resolution through the single hoisted root node_modules.",
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "4.0.2"
+  }
+}

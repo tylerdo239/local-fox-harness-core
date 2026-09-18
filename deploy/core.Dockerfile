@@ -3,7 +3,9 @@
 # @deepseek-ai/dsh-* packages this bundle imports — see
 # docs/cordis-agent-implementation-plan.md §0 for why this replaced an
 # earlier git-clone-of-the-whole-monorepo approach), so this build no longer
-# needs to compile dsh itself — only our own two small packages.
+# needs to compile dsh itself — only our own small packages (bundle-core,
+# plus the cloned llm/openai-compat + tool/serper-web-search plugins, plus
+# our own original tool/n8n).
 #
 # Two stages because apps/web is a deliberately standalone pnpm project (own
 # pnpm-workspace.yaml — mixing its React 19 into the root workspace is not
@@ -22,10 +24,23 @@ FROM node:22-bookworm-slim AS core-builder
 WORKDIR /app
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 COPY packages/bundle-core/package.json packages/bundle-core/
+COPY packages/llm/openai-compat/package.json packages/llm/openai-compat/
+COPY packages/tool/serper-web-search/package.json packages/tool/serper-web-search/
+COPY packages/tool/n8n/package.json packages/tool/n8n/
+COPY packages/tool/create-skill/package.json packages/tool/create-skill/
 RUN corepack enable && corepack prepare pnpm@11.7.0 --activate \
  && pnpm install --frozen-lockfile
 COPY packages/bundle-core/ packages/bundle-core/
-RUN pnpm --dir packages/bundle-core run build
+COPY packages/llm/openai-compat/ packages/llm/openai-compat/
+COPY packages/tool/serper-web-search/ packages/tool/serper-web-search/
+COPY packages/tool/n8n/ packages/tool/n8n/
+COPY packages/tool/create-skill/ packages/tool/create-skill/
+COPY packages/skills/ packages/skills/
+RUN pnpm --dir packages/llm/openai-compat run build \
+ && pnpm --dir packages/tool/serper-web-search run build \
+ && pnpm --dir packages/tool/n8n run build \
+ && pnpm --dir packages/tool/create-skill run build \
+ && pnpm --dir packages/bundle-core run build
 
 FROM node:22-bookworm-slim AS runtime
 WORKDIR /app

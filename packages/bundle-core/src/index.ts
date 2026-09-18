@@ -4,4 +4,6 @@
 // instead, so plain `export *` here would silently collide on the shared
 // `name`/`apply` bindings (ES module star-export ambiguity drops both).
 export * as ui from './ui.ts'
+export * as auth from './auth.ts'
 export * as gateway from './gateway.ts'
+export * as audit from './audit.ts'

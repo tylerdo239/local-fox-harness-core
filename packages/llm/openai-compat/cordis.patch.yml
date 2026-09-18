@@ -1,0 +1,12 @@
+# Pure ADD (id doesn't exist upstream) — plain `insert:` is correct here,
+# same convention as example-2's own packages/llm/openai-compat/cordis.patch.yml
+# and bundle-core's own. Only applied when this package's name is listed in
+# a profile's `dsh.profile.bundles` array (deploy/entrypoint.sh) — this file
+# existing is not enough by itself.
+- insert:
+    - id: cordis-llm-openai-compat
+      name: '@cordis-app/llm-openai-compat'
+      config:
+        provider: openai-compat
+        baseURL: https://api.openai.com/v1
+        apiKeyEnv: OPENAI_API_KEY

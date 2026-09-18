@@ -1,0 +1,24 @@
+{
+  "name": "@cordis-app/llm-openai-compat",
+  "description": "Generic OpenAI-compatible chat-completions LlmAdapter (real OpenAI, Azure OpenAI, Ollama, vLLM, LM Studio, OpenRouter, ...), cloned from example-2/packages/llm/openai-compat.",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
+  "comment_dependencies": "Deliberately none here beyond the cordis peer — same real reason bundle-core's own package.json documents: pnpm's hoisted linker (pnpm-workspace.yaml) creates a REAL, separate node_modules copy for any @deepseek-ai/dsh-* dependency declared directly on a workspace package, which produced a TypeScript duplicate-identity error (two different paths for the exact same version) the first time this repo tried it. @deepseek-ai/dsh-llm and @deepseek-ai/dsh-credentials are declared once, at the root package.json (already needed there by other bundle-core files), and eventsource-parser likewise — all three resolve here via plain Node upward directory-walk resolution through the single hoisted root node_modules, exactly like bundle-core's own files do. example-2's own packages/llm/openai-compat DOES redeclare these as devDependencies — that pattern is NOT copied here on purpose, since we have direct evidence in this repo (not theirs) that it breaks.",
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "4.0.2"
+  }
+}

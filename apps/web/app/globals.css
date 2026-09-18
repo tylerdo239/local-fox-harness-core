@@ -1,10 +1,129 @@
 @import "tailwindcss";
 
+/* UI clone plan Phase B (docs/cordis-ui-clone-plan.md) — design tokens
+ * translated from example-2/apps/web/public/theme.css's real values into
+ * Tailwind v4's CSS-first @theme config, not ported as raw `fh-*` CSS
+ * classes (confirmed decision: rebuild in Tailwind). Collapsed their
+ * 2-layer `--fh-*` (raw) -> `--color` (semantic alias, with a
+ * var(--fh-x, fallback) safety net for a separately-loaded theme
+ * stylesheet) into ONE layer — that fallback existed because their
+ * `theme.css` used to be a dynamically-mounted plugin that could fail to
+ * load; ours is compiled directly into this file, so there is nothing to
+ * fall back from. Values themselves are unchanged from their real ones. */
 :root {
   color-scheme: light dark;
+  --color-bg: #ffffff;
+  --color-surface: #f1f3f5;
+  --color-border: #e1e5ee;
+  --color-fg: #0f1115;
+  --color-muted: #61666b;
+  --color-accent: #ff7a1f;
+  --color-accent-contrast: #ffffff;
+  --color-accent-text: #b3450c;
+  --color-bubble-user: #fdece0;
+  --color-bubble-assistant: #f1f3f5;
+  --color-bubble-live: #fef5e7;
+  --color-error: #ec1313;
+  --color-status-success: #1a7f37;
+  --color-status-neutral: #61666b;
+  --color-status-danger: #ec1313;
+  --color-overlay-mask: rgb(15 17 21 / 0.4);
+  --color-bg-hover: #e9ebef;
+  --color-bg-raised: #f5f6f8;
+  --color-border-subtle: rgb(15 17 21 / 0.08);
+  --shadow-fh-sm: 0 1px 2px rgb(15 17 21 / 0.06);
+  --shadow-fh-md: 0 4px 16px rgb(15 17 21 / 0.08);
+  --shadow-fh-lv1: 0 2px 4px 0 rgb(0 0 0 / 0.05);
+  --shadow-fh-lv2: 0 4px 12px 0 rgb(0 0 0 / 0.02), 0 2px 8px 0 rgb(0 0 0 / 0.04);
+  --shadow-fh-lv3: 0 0 1px 0 rgb(0 0 0 / 0.2), 0 0 4px 0 rgb(0 0 0 / 0.02), 0 12px 32px 0 rgb(0 0 0 / 0.08);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --color-bg: #151517;
+    --color-surface: #232324;
+    --color-border: #353638;
+    --color-fg: #f9fafb;
+    --color-muted: #adb2b8;
+    --color-accent: #d9600f;
+    --color-accent-text: #f37021;
+    --color-bubble-user: #3a2712;
+    --color-bubble-assistant: #232324;
+    --color-bubble-live: #27241f;
+    --color-error: #f25a5a;
+    --color-status-success: #3fb950;
+    --color-status-neutral: #adb2b8;
+    --color-status-danger: #f25a5a;
+    --color-overlay-mask: rgb(0 0 0 / 0.6);
+    --color-bg-hover: #2a2c30;
+    --color-bg-raised: #1c1e21;
+    --color-border-subtle: rgb(255 255 255 / 0.08);
+    --shadow-fh-sm: 0 1px 2px rgb(0 0 0 / 0.3);
+    --shadow-fh-md: 0 4px 16px rgb(0 0 0 / 0.4);
+  }
+}
+
+:root[data-theme="dark"] {
+  --color-bg: #151517;
+  --color-surface: #232324;
+  --color-border: #353638;
+  --color-fg: #f9fafb;
+  --color-muted: #adb2b8;
+  --color-accent: #d9600f;
+  --color-accent-text: #f37021;
+  --color-bubble-user: #3a2712;
+  --color-bubble-assistant: #232324;
+  --color-bubble-live: #27241f;
+  --color-error: #f25a5a;
+  --color-status-success: #3fb950;
+  --color-status-neutral: #adb2b8;
+  --color-status-danger: #f25a5a;
+  --color-overlay-mask: rgb(0 0 0 / 0.6);
+  --color-bg-hover: #2a2c30;
+  --color-bg-raised: #1c1e21;
+  --color-border-subtle: rgb(255 255 255 / 0.08);
+  --shadow-fh-sm: 0 1px 2px rgb(0 0 0 / 0.3);
+  --shadow-fh-md: 0 4px 16px rgb(0 0 0 / 0.4);
+}
+
+@theme inline {
+  --color-bg: var(--color-bg);
+  --color-surface: var(--color-surface);
+  --color-border: var(--color-border);
+  --color-fg: var(--color-fg);
+  --color-muted: var(--color-muted);
+  --color-accent: var(--color-accent);
+  --color-accent-contrast: var(--color-accent-contrast);
+  --color-accent-text: var(--color-accent-text);
+  --color-bubble-user: var(--color-bubble-user);
+  --color-bubble-assistant: var(--color-bubble-assistant);
+  --color-bubble-live: var(--color-bubble-live);
+  --color-error: var(--color-error);
+  --color-status-success: var(--color-status-success);
+  --color-status-neutral: var(--color-status-neutral);
+  --color-status-danger: var(--color-status-danger);
+  --color-overlay-mask: var(--color-overlay-mask);
+  --color-bg-hover: var(--color-bg-hover);
+  --color-bg-raised: var(--color-bg-raised);
+  --color-border-subtle: var(--color-border-subtle);
+
+  --radius-fh-sm: 6px;
+  --radius-fh-md: 10px;
+  --radius-fh-lg: 14px;
+
+  --shadow-fh-sm: var(--shadow-fh-sm);
+  --shadow-fh-md: var(--shadow-fh-md);
+  --shadow-fh-lv1: var(--shadow-fh-lv1);
+  --shadow-fh-lv2: var(--shadow-fh-lv2);
+  --shadow-fh-lv3: var(--shadow-fh-lv3);
+
+  --font-fh: -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", Roboto, sans-serif;
+
+  --ease-fh: cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 body {
-  background: light-dark(#ffffff, #0a0a0a);
-  color: light-dark(#111111, #ededed);
+  background: var(--color-bg);
+  color: var(--color-fg);
+  font-family: var(--font-fh);
 }

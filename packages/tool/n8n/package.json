@@ -1,0 +1,19 @@
+{
+  "name": "@cordis-app/tool-n8n",
+  "description": "n8n integration: agent tools for workflow CRUD/activation/execution, plus an inbound webhook route that starts new agent Sessions from n8n. Entirely original to this project — example-2 has no n8n package of its own. Opt-in only (no dsh.bundle.patch here, unlike the other cloned plugins): Config.baseURL is required with no sensible universal default (every deployment's n8n instance is different) — enable it via a profile-level cordis.patch.yml row instead, see docs/patch-cookbook.md's n8n example.",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
+  "comment_dependencies": "Deliberately none here beyond the cordis peer — see packages/llm/openai-compat/package.json's own comment_dependencies for the real prior bug this avoids. @deepseek-ai/dsh-tools, dsh-credentials, dsh-webhook, dsh-user-approval, dsh-host-webserver, dsh-llm, and dsh-util-values are all declared once, at the root package.json, and resolve here via plain Node upward directory-walk resolution through the single hoisted root node_modules.",
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "4.0.2"
+  }
+}

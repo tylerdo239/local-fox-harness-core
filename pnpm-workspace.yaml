@@ -1,5 +1,12 @@
 packages:
   - packages/*
+  # Grouped packages (a group folder holding related packages, e.g.
+  # packages/llm/openai-compat) — same packages/<group>/<pkg> convention
+  # example-2 itself uses once a category has more than one member. A group
+  # directory (packages/llm, packages/tool) has no package.json of its own,
+  # so this glob simply finds nothing there and moves on; singleton
+  # packages stay flat at packages/<name> (bundle-core, unchanged).
+  - packages/*/*
   - apps/*
 
 # Confirmed necessary the hard way by a prior project on the same npm-based

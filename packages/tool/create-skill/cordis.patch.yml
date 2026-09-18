@@ -1,0 +1,6 @@
+# Pure ADD (id doesn't exist upstream) — plain `insert:` is correct here,
+# same convention as example-2's own packages/tool/create-skill/cordis.patch.yml.
+# No config needed — apply(ctx) takes none.
+- insert:
+    - id: cordis-tool-create-skill
+      name: '@cordis-app/tool-create-skill'

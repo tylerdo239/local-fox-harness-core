@@ -1,0 +1,24 @@
+{
+  "name": "@cordis-app/tool-serper-web-search",
+  "description": "Search source 'serper' for dsh-tool-web's web_search tool, via Serper.dev. Cloned from example-2/packages/tool/serper-web-search.",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
+  "comment_dependencies": "Deliberately none here beyond the cordis peer — see packages/llm/openai-compat/package.json's own comment_dependencies for the real prior bug this avoids. @deepseek-ai/dsh-web and @deepseek-ai/dsh-credentials are declared once, at the root package.json, and resolve here via plain Node upward directory-walk resolution through the single hoisted root node_modules.",
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "4.0.2"
+  }
+}

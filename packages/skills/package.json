@@ -1,0 +1,6 @@
+{
+  "name": "@cordis-app/skills",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Built-in skills (<name>/SKILL.md) shared by every user. Loaded by dsh-skill-filesystem through the CORDIS_BUNDLED_SKILL_DIR env var (bundle-core's own cordis.patch.yml row). Not a dsh bundle — see README.md. Cloned verbatim from example-2/packages/skills — no fox-harness-specific content, portable as-is."
+}

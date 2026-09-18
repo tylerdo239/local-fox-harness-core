@@ -9,9 +9,21 @@
 // reached (exact table, then longest prefix, then fallback), so both
 // coexist and ours always wins without disabling or fighting web-runtime
 // for the seat.
+//
+// UI clone plan Phase A (docs/cordis-ui-clone-plan.md, confirmed decision):
+// the index shell is now served PUBLICLY (no cookie required) so our own
+// login screen (auth.ts) has something to render — only `/api/v1/*` stays
+// behind dsh's real cookie check, the standard "public app shell, protected
+// data" SPA model. `authorizeIndex` is still called, but ONLY on an actual
+// `?token=` exchange (its mint-cookie-and-redirect side effect must still
+// run for that path, exactly as before — auth.ts's login route depends on
+// it via `ctx.connection.authenticatedUrl()`); every other request just
+// gets the shell directly, since `authorizeIndex` already fully owns `res`
+// whenever it returns false (a 401 in the old behavior) and there is no way
+// to inspect that decision without risking writing to `res` twice.
 import { existsSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
-import { dirname, resolve } from 'node:path'
+import { dirname, extname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { Context } from '@deepseek-ai/cordis'
 import { serveStatic } from '@deepseek-ai/dsh-host-frontend-static'
@@ -45,10 +57,22 @@ export function apply(ctx: Context): void {
     kind: 'prefix',
     path: '',
     handler: (req, res) => {
-      const pathname = decodeURIComponent(new URL(req.url ?? '/', 'http://cordis-ui.internal').pathname)
+      const url = new URL(req.url ?? '/', 'http://cordis-ui.internal')
+      const pathname = decodeURIComponent(url.pathname)
+      const isTokenExchange = url.searchParams.has('token')
+      // SPA fallback for client-side "routes" like `/chat/<sessionId>`
+      // (Đợt 2: real `/chat/<id>` URLs via history.pushState, matching
+      // example-2's own pattern — see apps/web/lib/use-app-route.ts).
+      // serveStatic() itself has none ("missing paths return 404", per its
+      // own doc comment) — every real dist file has an extension
+      // (`_next/static/*.js`, `favicon.ico`, ...), so an extensionless,
+      // non-root path can only be an app route, never a missing asset;
+      // rewritten to `/` before serveStatic() ever sees it so it hits the
+      // exact `target === distRoot` index branch instead of a 404.
+      const isAppRoute = pathname !== '/' && extname(pathname) === ''
       return serveStatic(
-        pathname, res, distRoot, distIndex,
-        () => ctx.connection.authorizeIndex(req, res),
+        isAppRoute ? '/' : pathname, res, distRoot, distIndex,
+        () => isTokenExchange ? ctx.connection.authorizeIndex(req, res) : true,
         renderIndex,
       )
     },

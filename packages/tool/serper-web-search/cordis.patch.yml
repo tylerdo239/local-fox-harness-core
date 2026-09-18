@@ -1,0 +1,10 @@
+# Pure ADD (id doesn't exist upstream) — plain `insert:` is correct here,
+# same convention as example-2's own packages/tool/serper-web-search/cordis.patch.yml.
+# Deliberately does NOT include the tool-web/web overrides that make this
+# search source actually reachable (dsh-tool-web re-enabled, web.searchProvider
+# set to 'serper') — those live in bundle-core's own cordis.patch.yml instead,
+# same separation example-2 itself keeps (a reusable capability package stays
+# product-decision-free; the app's top composing bundle picks the winner).
+- insert:
+    - id: cordis-tool-serper-web-search
+      name: '@cordis-app/tool-serper-web-search'
