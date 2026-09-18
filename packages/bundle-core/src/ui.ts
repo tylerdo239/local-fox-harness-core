@@ -70,6 +70,20 @@ export function apply(ctx: Context): void {
       // rewritten to `/` before serveStatic() ever sees it so it hits the
       // exact `target === distRoot` index branch instead of a 404.
       const isAppRoute = pathname !== '/' && extname(pathname) === ''
+      // Cache policy, added after a real deployment confusion: a rebuilt UI was
+      // live on the server while an open tab kept running the previous bundle,
+      // and the user reported a bug that had already been fixed. serveStatic()
+      // sends only `content-type` — no `cache-control`, no `etag`, no
+      // `last-modified` — which leaves browsers free to hold the shell, so
+      // nothing ever told that tab a new build existed. Next's own asset names
+      // are content-hashed and can be kept forever; the shell that points at
+      // them must be revalidated on every load, or a deploy stays invisible.
+      // writeHead()'s own header object merges with these rather than replacing
+      // them, so setting them here survives serveStatic().
+      res.setHeader(
+        'cache-control',
+        pathname.startsWith('/_next/static/') ? 'public, max-age=31536000, immutable' : 'no-cache',
+      )
       return serveStatic(
         isAppRoute ? '/' : pathname, res, distRoot, distIndex,
         () => isTokenExchange ? ctx.connection.authorizeIndex(req, res) : true,
