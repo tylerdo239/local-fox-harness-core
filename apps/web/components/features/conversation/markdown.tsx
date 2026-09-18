@@ -10,17 +10,17 @@
 // tokens instead of raw Tailwind/browser defaults, so it reads as part of
 // the same UI instead of an unstyled dump.
 //
-// Đợt 21 — `remark-gfm` added (user: "chưa tạo ra link ... dẫn đến
-// workflow"): plain `react-markdown` only speaks CommonMark, which has no
-// bare-URL autolinking at all — confirmed for real, a live n8n_upsert_
-// workflow test had the model reply with a literal
-// "http://127.0.0.1:5678/workflow/<id>" (n8n-skill's own new rule asks for
-// this), and it rendered as inert plain text, not a clickable `<a>`. GFM's
-// "autolink literals" extension is what turns a bare URL into a real link,
-// and it needs this plugin explicitly — `remarkPlugins` was empty before.
-// Bonus: this table also fixes GFM tables (`table`/`th`/`td` below were
-// already styled in COMPONENTS but silently never rendered as tables
-// without this — same missing plugin).
+// `remark-gfm` added — found independently from 2 real angles, merged here:
+// plain `react-markdown` only speaks CommonMark, which parses neither GFM
+// pipe tables nor bare-URL autolinking. One report: tables rendered as raw
+// lines of pipes and dashes (the `table`/`th`/`td` entries below could
+// never fire without this plugin, and the model produces tables constantly
+// — a plain "how do TCP and UDP differ?" comes back as one). Separately: a
+// live n8n_upsert_workflow test had the model reply with a literal
+// "http://127.0.0.1:5678/workflow/<id>", which rendered as inert plain
+// text, not a clickable `<a>` — GFM's "autolink literals" extension is
+// what turns a bare URL into a real link. The plugin also restores
+// strikethrough and task lists.
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import type { ComponentProps } from 'react'
@@ -62,14 +62,23 @@ const COMPONENTS: ComponentProps<typeof ReactMarkdown>['components'] = {
     <pre className="my-2 overflow-x-auto rounded-xl border border-border-subtle bg-bg-raised p-3">{children}</pre>
   ),
   table: ({ children }) => (
-    <div className="my-2 overflow-x-auto">
-      <table className="border-collapse text-[0.9em]">{children}</table>
+    <div className="my-3 max-w-full overflow-x-auto rounded-xl border border-border-subtle">
+      <table className="w-full border-collapse text-left text-[0.9em]">{children}</table>
     </div>
   ),
-  th: ({ children }) => <th className="border border-border px-2 py-1 text-left font-semibold">{children}</th>,
-  td: ({ children }) => <td className="border border-border px-2 py-1">{children}</td>,
+  thead: ({ children }) => <thead className="bg-bg-raised">{children}</thead>,
+  tr: ({ children }) => <tr className="border-b border-border-subtle last:border-b-0">{children}</tr>,
+  th: ({ children }) => (
+    <th className="whitespace-nowrap px-3 py-2 text-left font-semibold text-fg">{children}</th>
+  ),
+  td: ({ children }) => <td className="px-3 py-2 align-top">{children}</td>,
+  del: ({ children }) => <del className="text-muted line-through">{children}</del>,
 }
 
 export function Markdown({ text }: { text: string }) {
-  return <ReactMarkdown remarkPlugins={[remarkGfm]} components={COMPONENTS}>{text}</ReactMarkdown>
+  return (
+    <ReactMarkdown remarkPlugins={[remarkGfm]} components={COMPONENTS}>
+      {text}
+    </ReactMarkdown>
+  )
 }

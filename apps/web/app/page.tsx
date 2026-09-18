@@ -23,6 +23,7 @@ import { useAppRoute } from '../lib/use-app-route'
 import { useLocale } from '../lib/i18n/locale'
 import { Conversation, hasRealUserMessage } from '../components/features/conversation/conversation'
 import { Composer } from '../components/features/conversation/composer'
+import { WorkspaceFiles } from '../components/features/conversation/workspace-files'
 import { Approvals } from '../components/features/conversation/approvals'
 import { SettingsDialog } from '../components/features/settings/settings-dialog'
 import { SkillsDialog } from '../components/features/skills/skills-dialog'
@@ -96,6 +97,7 @@ function ChatView({ sessionId }: { sessionId: string }) {
             <Conversation events={events} />
           </div>
         )}
+        <WorkspaceFiles sessionId={sessionId} />
         <Composer sessionId={sessionId} large={isEmpty} />
       </div>
     </div>

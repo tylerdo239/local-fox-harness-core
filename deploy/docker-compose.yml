@@ -61,6 +61,16 @@ services:
       - workspace:/workspace
     ports:
       - "127.0.0.1:3080:3080"   # loopback only — see architecture doc §2.3 for remote access
+    # No IPv6 here, declared rather than left implicit. dsh-web-fetch-http probes
+    # for a NAT64 prefix (ipv4only.arpa) whenever a hostname resolves with an
+    # IPv6 record, then synthesises v6 addresses that embed the v4 one. On
+    # 2026-09-18 one web_fetch did exactly that, got ENETUNREACH on
+    # 2606:4700:20::681a:5dc (= 104.26.5.220), and the unhandled socket error
+    # ended the process — the container restarted and every live chat dropped.
+    # With IPv6 off the probe finds nothing and that path never runs.
+    sysctls:
+      - net.ipv6.conf.all.disable_ipv6=1
+      - net.ipv6.conf.default.disable_ipv6=1
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
     restart: unless-stopped

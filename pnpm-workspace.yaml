@@ -20,6 +20,14 @@ packages:
 # uses the same setting.
 nodeLinker: hoisted
 
+# packages/skills is a sixth workspace member (own package.json) that deploy/core.Dockerfile copies
+# in AFTER its `pnpm install --frozen-lockfile`, so pnpm sees the workspace as out of sync and runs
+# an implicit install before every `pnpm run`. Measured on the deploy host: the first such install
+# finished in 12s, the second hung indefinitely — sleeping, no network traffic, 20+ minutes, three
+# builds in a row. The install step already resolved every dependency and packages/skills has none
+# of its own, so that pre-run check has nothing left to verify.
+verifyDepsBeforeRun: false
+
 # pnpm 10+ blocks any dependency's install/build script until reviewed here.
 allowBuilds:
   # First-party dsh package (subprocess spawning) — needed for real.

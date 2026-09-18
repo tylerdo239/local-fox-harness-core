@@ -48,8 +48,16 @@ WORKDIR /app
 # start, not just build time. socat: entrypoint.sh's 0.0.0.0-reachable proxy
 # in front of dsh's own loopback-only listener (see entrypoint.sh for why —
 # confirmed necessary against a real Docker Desktop run, not a guess).
+#
+# python3 + numpy + pandas because the image had no interpreter at all: asked
+# to count the primes under 100000, the agent called `python3` (not found),
+# then `python` (not found), then probed with `which python3 python perl ruby`
+# and fell back to writing Perl — three wasted steps before any real work, on
+# an agent whose main job is analysing data. Installed from apt rather than
+# pip so the build stays offline-deterministic and compiles nothing.
 RUN npm install --global pnpm@11.7.0 && npm cache clean --force \
- && apt-get update && apt-get install --no-install-recommends -y socat \
+ && apt-get update && apt-get install --no-install-recommends -y \
+      socat python3 python3-numpy python3-pandas \
  && rm -rf /var/lib/apt/lists/*
 COPY --from=core-builder /app /app
 COPY --from=web-builder /web/out /app/apps/web/out

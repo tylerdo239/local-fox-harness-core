@@ -11,6 +11,9 @@
     "./auth": "./lib/auth.js",
     "./gateway": "./lib/gateway.js",
     "./audit": "./lib/audit.js",
+    "./prompt": "./lib/prompt.js",
+    "./resilience": "./lib/resilience.js",
+    "./web-clean": "./lib/web-clean.js",
     "./package.json": "./package.json"
   },
   "dsh": {

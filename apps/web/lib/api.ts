@@ -233,3 +233,18 @@ export function login(username: string, password: string): Promise<{ redirectUrl
 export function logout(): Promise<{ ok: true }> {
   return request('/auth/logout', { method: 'POST' })
 }
+
+export interface WorkspaceFile {
+  readonly path: string
+  readonly size: number
+  readonly modified: number
+}
+
+export function listWorkspaceFiles(sessionId: string): Promise<{ files: WorkspaceFile[] }> {
+  return request(`/workspace-files?id=${encodeURIComponent(sessionId)}`)
+}
+
+/** Same-origin URL the browser opens directly — the file is bytes, not JSON, so it never goes through `request`. */
+export function workspaceFileUrl(sessionId: string, path: string): string {
+  return `/api/v1/workspace-file?id=${encodeURIComponent(sessionId)}&path=${encodeURIComponent(path)}`
+}

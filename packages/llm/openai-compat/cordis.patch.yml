@@ -26,7 +26,14 @@
         provider: openai-compat
         baseURL: https://api.openai.com/v1
         apiKeyEnv: OPENAI_API_KEY
-        contextWindow: !!js 'process.env.OPENAI_CONTEXT_WINDOW ? Number(process.env.OPENAI_CONTEXT_WINDOW) : undefined'
+        # 32000 fallback (not undefined) merged in from a colleague's own
+        # parallel fix, landed the same day — their own real finding: without
+        # a declared window, compaction-basic has nothing to measure against,
+        # so a long chat just grows until the model rejects it. Same failure
+        # mode this session's own CONTEXT_WINDOW_EXCEEDED investigation
+        # already root-caused, confirmed independently. Still env-var
+        # overridable for a model whose real window isn't 32000.
+        contextWindow: !!js 'process.env.OPENAI_CONTEXT_WINDOW ? Number(process.env.OPENAI_CONTEXT_WINDOW) : 32000'
         extraBody: !!js 'process.env.OPENAI_EXTRA_BODY ? JSON.parse(process.env.OPENAI_EXTRA_BODY) : undefined'
 
 # Override, not insert — `agent-default-model` already exists as a row from

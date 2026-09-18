@@ -33,6 +33,18 @@
 // transparent in the chat log (a real "Tiếp tục" bubble appears), not a
 // hidden resume the user can't see happened.
 //
+// Merged with a parallel branch (2026-09-19, a colleague's own independent
+// Stop-button work) that landed the same day: kept this branch's 3-state
+// Dừng/Tiếp tục/Huỷ bỏ task flow (more deliberate — those 2 only ever
+// appear after Dừng is pressed, not alongside it) and its
+// latestTurnStartSeq workaround for the confirmed real dsh-agent-loop bug
+// where a cancelled turn never gets a `turn/end` — but adopted their
+// `RunStatus` addition (live "thinking…"/tool-name/elapsed-time row,
+// `runningState()` in conversation.tsx), which this branch didn't have.
+// `RunStatus` is fed the workaround-corrected `running`, not the raw
+// `run.running`, or its own elapsed-time display would get stuck exactly
+// the same way the button would have.
+//
 // Đợt 17 — the "/" skill picker (user request: "khi chat / ko hiện ra các
 // option skill"). Ported from example-2's real SkillMenu.tsx/slashQuery —
 // SettingsDialog/SkillsDialog's own copy already promised this ("Gõ /tên
@@ -46,13 +58,14 @@
 // example-2's own separate skillsApi.ts pub/sub cache — this app already
 // has one shared cache mechanism, no need for a second.
 import { useEffect, useRef, useState } from 'react'
-import { useMutation, useQuery } from '@tanstack/react-query'
 import { Ban, Square } from 'lucide-react'
+import { useMutation, useQuery } from '@tanstack/react-query'
 import { interruptSession, listSkills, sendMessage, type SkillSummary } from '../../../lib/api'
 import { useChatStore } from '../../../lib/store'
+import { latestTurnStartSeq, runningState } from './conversation'
+import { RunStatus } from './run-status'
 import { useLocale } from '../../../lib/i18n/locale'
 import { Button } from '../../primitives/button'
-import { isAgentRunning, latestTurnStartSeq } from './conversation'
 
 // The menu is open only while the whole composer text is still the bare
 // command token — matches example-2's own real slashQuery exactly (same
@@ -116,16 +129,17 @@ export function Composer({ sessionId, large = false }: { sessionId: string; larg
   // {kind:'user'}}` — dsh-session's own TurnEndReasonMap), so which button
   // was pressed has to be tracked client-side.
   const [softStopped, setSoftStopped] = useState(false)
-  // Workaround for a real, confirmed upstream bug (see isAgentRunning's own
-  // comment in conversation.tsx): a cancelled turn never actually gets a
-  // `turn/end` event, so `isAgentRunning(events)` alone would show "running"
-  // forever after Dừng/Huỷ bỏ task — the button would never leave that
-  // state. Tracks which turn (`turn/start`'s own seq) we last asked to
-  // stop; `running` below only trusts the raw event derivation once a
-  // DIFFERENT (newer) turn/start proves the agent genuinely moved on.
+  // Workaround for a real, confirmed upstream bug (see latestTurnStartSeq's
+  // own comment in conversation.tsx): a cancelled turn never actually gets
+  // a `turn/end` event, so `run.running` alone would show "running" forever
+  // after Dừng/Huỷ bỏ task — both the button AND RunStatus's elapsed-time
+  // indicator would show "still running" forever. Tracks which turn
+  // (`turn/start`'s own seq) we last asked to stop; `running` below only
+  // trusts the raw event derivation once a DIFFERENT (newer) turn/start
+  // proves the agent genuinely moved on.
   const [stoppedTurnStartSeq, setStoppedTurnStartSeq] = useState<number | undefined>(undefined)
-  const rawRunning = isAgentRunning(events)
-  const running = rawRunning && latestTurnStartSeq(events) !== stoppedTurnStartSeq
+  const run = runningState(events)
+  const running = run.running && latestTurnStartSeq(events) !== stoppedTurnStartSeq
 
   useEffect(() => { setSoftStopped(false); setStoppedTurnStartSeq(undefined) }, [sessionId])
   useEffect(() => { if (running) setSoftStopped(false) }, [running])
@@ -217,30 +231,38 @@ export function Composer({ sessionId, large = false }: { sessionId: string; larg
           }
         }}
       />
-      <div className="flex items-center justify-end gap-2">
-        {running ? (
-          // Running: ONLY the Stop button — no Send, no Cancel task yet
-          // (matches the requested flow exactly: those 2 only appear AFTER
-          // Dừng is pressed, not alongside it).
-          <Button variant="outline" disabled={stop.isPending} onClick={() => { stop.mutate() }}>
-            <Square size={14} />
-            {t('conversation.stop')}
-          </Button>
-        ) : softStopped ? (
-          <>
-            <Button variant="outline" disabled={cancelTask.isPending} onClick={() => { cancelTask.mutate() }}>
-              <Ban size={14} />
-              {t('conversation.cancelTask')}
+      <div className="flex items-center gap-2">
+        {/* RunStatus gets `running` (the bug-workaround-corrected value),
+            not the raw `run.running` — otherwise its elapsed-time indicator
+            would ALSO get stuck "still running" forever after Dừng/Huỷ bỏ
+            task, same reason the button logic below doesn't trust
+            `run.running` directly either. */}
+        <RunStatus run={{ ...run, running }} />
+        <div className="ml-auto flex items-center gap-2">
+          {running ? (
+            // Running: ONLY the Stop button — no Send, no Cancel task yet
+            // (matches the requested flow exactly: those 2 only appear AFTER
+            // Dừng is pressed, not alongside it).
+            <Button variant="outline" disabled={stop.isPending} onClick={() => { stop.mutate() }}>
+              <Square size={13} fill="currentColor" />
+              {t('conversation.stop')}
             </Button>
-            <Button variant="primary" disabled={send.isPending} onClick={() => { send.mutate(t('conversation.continue')) }}>
-              {t('conversation.continue')}
+          ) : softStopped ? (
+            <>
+              <Button variant="outline" disabled={cancelTask.isPending} onClick={() => { cancelTask.mutate() }}>
+                <Ban size={14} />
+                {t('conversation.cancelTask')}
+              </Button>
+              <Button variant="primary" disabled={send.isPending} onClick={() => { send.mutate(t('conversation.continue')) }}>
+                {t('conversation.continue')}
+              </Button>
+            </>
+          ) : (
+            <Button variant="primary" disabled={send.isPending} onClick={submit}>
+              {t('conversation.send')}
             </Button>
-          </>
-        ) : (
-          <Button variant="primary" disabled={send.isPending} onClick={submit}>
-            {t('conversation.send')}
-          </Button>
-        )}
+          )}
+        </div>
       </div>
       {send.isError ? <p className="text-xs text-error">{(send.error as Error).message}</p> : null}
       {stop.isError ? <p className="text-xs text-error">{(stop.error as Error).message}</p> : null}

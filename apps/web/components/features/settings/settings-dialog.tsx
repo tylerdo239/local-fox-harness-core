@@ -14,6 +14,14 @@
 // nothing for an end user to pick here. The admin password still lives
 // under Account, unaffected.
 //
+// 2026-09-18 — the model's own API key is back in this tab, as one more
+// CredentialField. Removing the model PICKER was right (an end user has no
+// business choosing the route), but it also took away the only place to store
+// the key that route needs: on a fresh deploy the app boots, logs in and
+// accepts a message, then every turn dies with MISSING_CREDENTIAL and nothing
+// in the UI can fix it or even say where to go. Found by deploying this repo
+// from scratch. The key stays write-only here, same as Serper's.
+//
 // Đợt 16 — the standalone "Web search" tab (Serper only) merged into a
 // broader "Config" tab: user request, grouping Serper alongside n8n's own
 // API key + webhook secret since all three are the same shape of thing
@@ -119,6 +127,18 @@ function ConfigTab() {
   const { t } = useLocale()
   return (
     <div className="flex flex-col gap-4">
+      <CredentialField
+        refName="OPENAI_API_KEY"
+        title={t('settings.modelKeyTitle')}
+        hint={t('settings.modelKeyHint')}
+        placeholder={t('settings.modelKeyPlaceholder')}
+      />
+      <CredentialField
+        refName="OPENAI_BASE_URL"
+        title={t('settings.modelBaseUrlTitle')}
+        hint={t('settings.modelBaseUrlHint')}
+        placeholder={t('settings.modelBaseUrlPlaceholder')}
+      />
       <CredentialField
         refName="SERPER_API_KEY"
         title={t('settings.webSearchTitle')}
