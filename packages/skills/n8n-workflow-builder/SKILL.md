@@ -1,6 +1,6 @@
 ---
 name: n8n-workflow-builder
-description: Tạo, sửa và chạy thử workflow tự động hoá trong n8n qua các tool n8n_* — dựng JSON đúng cấu trúc, chạy thử lấy kết quả thật, rồi trả link mở workflow. Dùng khi người dùng cần một luồng tự động trong n8n, ví dụ "tạo workflow", "tự động hoá", "nối webhook với ...".
+description: Làm việc với workflow n8n — tạo mới, sửa, gỡ lỗi, chạy thử, kích hoạt, liệt kê. Chứa tên node, cấu trúc JSON và hình dạng tham số mà n8n đòi hỏi. Dùng cho MỌI yêu cầu có nhắc tới n8n hoặc workflow, kể cả khi chỉ là sửa một chi tiết nhỏ hay tìm hiểu vì sao một workflow chạy sai — ví dụ "tạo workflow", "sửa workflow", "workflow trả về rỗng", "workflow lỗi", "chạy thử workflow", "tự động hoá".
 ---
 
 # n8n-workflow-builder
@@ -25,6 +25,12 @@ node — tên node phải viết đúng ngay từ đầu, xem mục dưới.
    trong kết quả để lấy đầu ra thật.
 6. Trả về cho người dùng kèm link markdown mở workflow, lấy `editorUrl` trong
    kết quả upsert.
+
+Khi workflow chạy xong nhưng kết quả sai hoặc rỗng: `n8n_get_workflow` rồi đối
+chiếu `parameters` của từng node với mục "Tham số hay cần" bên dưới, sửa đúng
+chỗ lệch. Kết quả rỗng gần như luôn là một khoá viết sai trong `parameters` —
+n8n bỏ qua khoá lạ và vẫn báo thành công. Đổi `responseMode` hay thêm node
+`respondToWebhook` không chữa được việc đó.
 
 ## Viết node cho đúng
 
