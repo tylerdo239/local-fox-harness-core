@@ -62,11 +62,15 @@ dùng `httpRequest` gọi thẳng API của dịch vụ đó.
 - `connections` khoá theo **`name`** của node. `main` là mảng-của-mảng:
   `main[0]` là output thứ nhất. `if` có hai output (true, false), `switch` có
   nhiều. Node cuối không xuất hiện trong `connections`.
-- `id` của workflow chỉ truyền qua tham số `workflowId`, không đặt trong JSON.
+- `id` của workflow chỉ truyền qua tham số `workflowId`, không đặt trong JSON;
+  `name`, `nodes`, `connections`, `settings` thì luôn phải có, kể cả khi sửa.
 
 ## Tham số hay cần
 
-- **`webhook`** — `responseMode` quyết định người gọi nhận được gì:
+- **`webhook`** — dữ liệu người gọi gửi lên nằm trong `$json.body`, không phải
+  ngay trong `$json`: với payload `{"so_luong": 3}` thì viết
+  `={{ $json.body.so_luong }}`. Cùng item còn có `headers`, `query`, `params`.
+  `responseMode` quyết định người gọi nhận được gì:
   `onReceived` chỉ báo đã nhận, `lastNode` trả output của node cuối (dùng cái
   này khi cần xem kết quả), `responseNode` trả theo node `respondToWebhook` —
   và chỉ khi đó mới được đặt node `respondToWebhook`.

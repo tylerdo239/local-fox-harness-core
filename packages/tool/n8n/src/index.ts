@@ -194,7 +194,7 @@ async function getOrCreateTag(ctx: Context, config: Config, tagName: string): Pr
  * parsing it once before validating — a malformed string still fails
  * validation the same way it would have unparsed.
  */
-function coerceWorkflowArg(value: unknown): unknown {
+function coerceJsonArg(value: unknown): unknown {
   if (typeof value !== 'string') return value
   try {
     return JSON.parse(value)
@@ -466,7 +466,7 @@ export function apply(ctx: Context, config: Config): void {
     },
     output: { schema: { type: 'json' }, render: renderJson },
     async execute(args) {
-      return asJson(validateWorkflowStructure(coerceWorkflowArg(args.workflow)))
+      return asJson(validateWorkflowStructure(coerceJsonArg(args.workflow)))
     },
   })), 'cordis-n8n: n8n_validate_workflow')
 
@@ -485,7 +485,7 @@ export function apply(ctx: Context, config: Config): void {
     },
     output: { schema: { type: 'json' }, render: renderJson },
     async execute(args, exec) {
-      const workflow = coerceWorkflowArg(args.workflow)
+      const workflow = coerceJsonArg(args.workflow)
       const { valid, errors } = validateWorkflowStructure(workflow)
       if (!valid) throw new Error(`workflow failed local validation: ${errors.join('; ')}`)
       let workflowId = args.workflowId
@@ -599,10 +599,15 @@ export function apply(ctx: Context, config: Config): void {
       const path = webhookNode.parameters?.path
       if (typeof path !== 'string' || path === '') throw new Error(`workflow ${args.workflowId}'s Webhook node has no configured path`)
       const method = typeof webhookNode.parameters?.httpMethod === 'string' ? webhookNode.parameters.httpMethod : 'POST'
+      // Same string-instead-of-object arrival as `workflow` (see
+      // coerceJsonArg): stringifying an already-encoded string again sends
+      // n8n a JSON string literal, so the webhook node's `body` is a string
+      // and every `$json.body.<field>` expression downstream reads undefined.
+      const payload = coerceJsonArg(args.payload)
       const response = await fetch(`${config.baseURL}/webhook/${path}`, {
         method,
         headers: { 'content-type': 'application/json' },
-        body: args.payload === undefined ? undefined : JSON.stringify(args.payload),
+        body: payload === undefined ? undefined : JSON.stringify(payload),
       })
       const responseBody: unknown = await response.json().catch(async () => response.text())
       return asJson({ status: response.status, body: responseBody })
