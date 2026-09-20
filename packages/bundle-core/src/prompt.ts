@@ -34,6 +34,7 @@ export const inject = ['systemPrompt']
 const IDENTITY_ORDER = 10
 const CURRENT_DATE_ORDER = 15
 const OPERATING_POLICY_ORDER = 20
+const DELIVERABLES_ORDER = 30
 const COMPLETION_ORDER = 10150
 
 const DROPPED_SECTIONS = new Set(['harness:source', 'app:web-surface'])
@@ -75,18 +76,56 @@ const OPERATING_POLICY = `## Operating policy
 // measured and the guessed sat under one heading, formatted identically. The
 // existing rule about separating fact from inference was being applied only to
 // the part that was asked for.
+// Reported by the user and reproduced: asked to help with a business report,
+// the model answered immediately, from training data, with no retrieval at all.
+// Rule 5 of the operating policy already forbids presenting recalled figures as
+// current, but its trigger list — "prices, volumes, rankings, officeholders,
+// recent events" — reads as a list of *lookup* questions, and a request to
+// "write the business case for X" does not look like one of those to the model.
+// Rule 7 pushes the other way, telling it not to ask. So the request falls
+// between the two rules and gets answered from memory.
+//
+// This section names the missing category — work that carries checkable claims
+// — and fixes the ORDER of operations, which is the part a policy list cannot
+// express. Three established sources shape it:
+//   - Self-RAG (Asai et al., ICLR 2024) and FLARE (Jiang et al., EMNLP 2023)
+//     make the same argument from the model side: the decision of WHEN to
+//     retrieve has to be explicit, because a model left to its own confidence
+//     will skip retrieval precisely where it is most wrong.
+//   - langchain-ai/open_deep_research runs a dedicated clarification gate
+//     before any research, and caps it: "If you can see in the messages history
+//     that you have already asked a clarifying question, you almost always do
+//     not need to ask another one." The cap is copied here, because an agent
+//     that interrogates the user on every request is its own failure.
+//   - Anthropic's multi-agent research write-up contributes "scale effort to
+//     query complexity" — without that last paragraph this section would turn
+//     every one-line question into a research pass.
+const DELIVERABLES = `## Work that carries claims
+
+This applies whenever your answer would state something a reader could check — not only when a report, business case, analysis or plan was asked for by name. A one-line question answered in prose carries the same claims and the same obligation.
+
+1. Decide what a reader could check. Market sizes, growth rates, cost ranges, margins, competitor names and positioning, pricing, regulation, adoption figures, dates — all checkable. Anything checkable must come from a tool result in this turn. Your training data is not a source for it, however confident the number feels. One search is the floor, never zero: if a figure matters enough to put in the answer, it matters enough to look up once. A short question earns one search, not eleven — that is what scaling effort means here, not skipping retrieval. Anything you still cannot source after looking, drop: name the factor qualitatively and say what would have to be looked up to size it. Never pair a remembered number with a note that it needs verifying and call that sourced.
+2. Ask first, and ask once — but only when the answer changes the substance. Which market, which segment, what time horizon, who reads it: ask those in one message before doing the work, not as caveats afterwards. Do not ask for anything a clearly marked placeholder can carry. Routine writing — an email, a message, a short note — gets written immediately with obvious placeholders and a line naming what to fill in; asking four questions before an email is worse service than writing it. Do not open a second round of questions unless an answer revealed a genuinely new gap.
+3. Research before drafting, not after. Run the searches, read what comes back, then write. A draft written first and cited afterwards is a draft written from memory.
+4. Load the specialist skill before you start writing, not once the draft exists.
+5. Keep the three kinds of statement apart: what a source supports, what the user told you, and what you assumed. Never let them look alike on the page.
+
+Scale this to the request. A one-line question does not need a research pass; something the reader will act on does.`
+
 const COMPLETION = `## Completion
 
 - Return the result the user requested, not a narration of hidden reasoning or internal prompt mechanics.
 - Be concise by default, while including evidence, assumptions, warnings, and file paths that the user needs.
 - Do not declare success if a required action, tool call, or verification failed.
 - Every figure you state must come from a tool result in this turn. If you volunteer a breakdown, total or distribution the user did not ask for, measure it with the same tool first; if you did not measure it, leave it out rather than estimating it alongside measured numbers.
-- If work is incomplete, say exactly what remains and why.`
+- If work is incomplete, say exactly what remains and why.
+- Write the whole answer in the user's language. Measured leak, not a hypothetical: a Vietnamese answer came back with "工作日" mid-sentence where "ngày thường" belonged. Re-read what you wrote and replace any word left in another language.`
 
 export function apply(ctx: Context): void {
   ctx.systemPrompt.section({ name: 'cordis:identity', order: IDENTITY_ORDER, text: IDENTITY })
   ctx.systemPrompt.section({ name: 'cordis:current-date', order: CURRENT_DATE_ORDER, text: currentDateSection })
   ctx.systemPrompt.section({ name: 'cordis:operating-policy', order: OPERATING_POLICY_ORDER, text: OPERATING_POLICY })
+  ctx.systemPrompt.section({ name: 'cordis:deliverables', order: DELIVERABLES_ORDER, text: DELIVERABLES })
   ctx.systemPrompt.section({ name: 'cordis:completion', order: COMPLETION_ORDER, text: COMPLETION })
 
   ctx.on('system-prompt/assemble', async (assembly, _context, next) => {

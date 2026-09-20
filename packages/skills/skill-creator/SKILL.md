@@ -39,33 +39,53 @@ thứ điều khiển hành vi về sau. Chia làm **hai vùng**:
 **Vùng 1 — tên và mô tả.** Viết thẳng ra, mỗi trường một dòng, không bọc trong
 rào code.
 
-**Vùng 2 — nội dung skill.** LUÔN đặt trong một khối rào ` ```markdown `.
+**Vùng 2 — nội dung skill.** LUÔN đặt trong một khối rào mở bằng **bốn** dấu
+huyền: ` ````markdown `, đóng lại cũng bằng bốn dấu.
 
 Lý do vùng 2 phải có rào: nội dung skill chứa `#`, `##`, `-`, `**`. Không rào
 thì khung chat hiển thị chúng thành tiêu đề và chữ đậm thật — người dùng không
 nhận ra đó là chuỗi sắp được lưu. Có rào thì họ đọc đúng từng ký tự.
 
+Lý do phải là bốn chứ không phải ba: rất nhiều skill có ví dụ code bên trong,
+tức bản thân nội dung đã chứa rào ba dấu. Một rào ba dấu bọc ngoài sẽ bị chính
+cái rào ba dấu bên trong đóng lại giữa chừng, và toàn bộ phần còn lại của bản
+nháp thoát ra ngoài, hiển thị thành tiêu đề với danh sách thật. Chuyện này đã
+xảy ra thật với một skill hướng dẫn vẽ diagram: nội dung có một khối
+` ```mermaid `, rào ngoài đứt ngay tại đó, và người dùng thấy nửa sau của bản
+nháp trông như một tài liệu đã hoàn chỉnh. Rào bốn dấu bọc được mọi rào ba dấu
+bên trong. Nếu nội dung có sẵn rào bốn dấu thì dùng năm, luật chung là nhiều
+hơn chuỗi dài nhất bên trong một dấu.
+
 Xuất ra chính xác dạng này (dấu rào là một phần của output):
 
-````text
+`````text
 **Tên:** bao-cao-tuan
 **Mô tả:** Dùng khi người dùng cần viết báo cáo tuần cho quản lý trực tiếp.
 
 **Nội dung:**
 
-```markdown
+````markdown
 # Báo cáo tuần
 
 1. Việc đã xong trong tuần, mỗi việc một dòng, có số liệu nếu có.
 2. Việc đang dở kèm phần trăm hoàn thành.
 3. Vướng mắc cần quản lý quyết định.
+
+Ví dụ khối lệnh nằm trong nội dung skill — rào ba dấu này nằm gọn bên trong
+rào bốn dấu ở trên, không làm đứt nó:
+
+```bash
+git log --since="7 days ago" --oneline
 ```
 ````
+`````
 
 Rồi hỏi duyệt.
 
-Đến lượt gọi `create_skill`, truyền vào `content` đúng phần **bên trong** rào —
-không kèm dòng ` ```markdown `, không kèm dòng ` ``` ` đóng, không kèm vùng 1.
+Đến lượt gọi `create_skill`, truyền vào `content` đúng phần **bên trong** rào
+bốn dấu — không kèm dòng ` ````markdown `, không kèm dòng ` ```` ` đóng, không
+kèm vùng 1. Rào ba dấu của các ví dụ code bên trong thì giữ nguyên, chúng là
+một phần thật của nội dung skill.
 
 Lưu xong, người dùng dùng được skill từ tin nhắn tiếp theo bằng cách gõ
 `/tên-skill`, và sửa hoặc xoá được trong mục **Kỹ năng** ở thanh bên. Skill

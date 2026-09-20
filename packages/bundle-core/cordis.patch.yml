@@ -314,6 +314,30 @@
 #     trivial to check was ignored. It reads `sessionProjections.stateOf`, so the
 #     gateway in this app most likely never emits the projection it waits on.
 #   - skill-badge: renders in dsh's own GUI, which apps/web replaced.
+# Persona. Two lines of dsh's own identity were reaching the model and both were
+# wrong for this deployment, visible only once the whole prompt was assembled and
+# read end to end:
+#   "You are an AI agent powered by DeepSeek Harness."   (harness:identity)
+#   "You are a coding agent powered by the {{model}} model."  (personaPrefix)
+# The first names the framework rather than the product. The second is worse than
+# cosmetic: it tells the model it is a CODING agent, while the sections below
+# spend 2_000 characters teaching it to research markets and write business
+# reports — the model was being told one job and asked to do another.
+#
+# A patch replaces a row's WHOLE config, so personaSuffix is restated verbatim
+# here; dropping it would silently remove the reply-in-the-user's-language rule.
+- id: system-prompt
+  name: '@deepseek-ai/dsh-system-prompt'
+  config:
+    includeHarnessIdentity: false
+    personaPrefix: You are Fox Harness, an AI agent built by FPT Telecom.
+    personaSuffix: >-
+      Your working directory is {{cwd}}. Always reply in the same language the
+      user's message is written in — match it exactly (e.g. Vietnamese in,
+      Vietnamese out; English in, English out), even if it changes
+      mid-conversation, regardless of what language your own reasoning or tool
+      calls use internally.
+
 - id: tool-todo
   disabled: false
 - id: tool-goal
