@@ -70,10 +70,11 @@ dùng `httpRequest` gọi thẳng API của dịch vụ đó.
 - **`webhook`** — dữ liệu người gọi gửi lên nằm trong `$json.body`, không phải
   ngay trong `$json`: với payload `{"so_luong": 3}` thì viết
   `={{ $json.body.so_luong }}`. Cùng item còn có `headers`, `query`, `params`.
-  `responseMode` quyết định người gọi nhận được gì:
-  `onReceived` chỉ báo đã nhận, `lastNode` trả output của node cuối (dùng cái
-  này khi cần xem kết quả), `responseNode` trả theo node `respondToWebhook` —
-  và chỉ khi đó mới được đặt node `respondToWebhook`.
+  `responseMode` chỉ nhận đúng ba giá trị — `"onReceived"` chỉ báo đã nhận,
+  `"lastNode"` trả output của node cuối, `"responseNode"` trả theo một node
+  `respondToWebhook`. Mặc định dùng `"lastNode"`: nó đơn giản nhất và đủ cho
+  hầu hết việc. Chỉ thêm node `respondToWebhook` khi đã đặt
+  `"responseMode": "responseNode"`, và ngược lại.
 - **`code`** — `jsCode` phải `return` mảng `[{ json: {...} }]`, đọc input bằng
   `$input.all()`. Viết ngắn gọn, tránh template literal nhiều dòng có dấu
   tiếng Việt.
