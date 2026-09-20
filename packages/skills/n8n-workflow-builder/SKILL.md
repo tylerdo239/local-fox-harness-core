@@ -50,7 +50,7 @@ dùng `httpRequest` gọi thẳng API của dịch vụ đó.
       "parameters": { "httpMethod": "POST", "path": "ten-workflow", "responseMode": "lastNode" } },
     { "id": "2", "name": "Set", "type": "n8n-nodes-base.set", "typeVersion": 3.4,
       "position": [220, 0],
-      "parameters": { "assignments": { "assignment": [
+      "parameters": { "assignments": { "assignments": [
         { "id": "1", "name": "ket_qua", "value": "xong", "type": "string" } ] } } }
   ],
   "connections": { "Webhook": { "main": [[{ "node": "Set", "type": "main", "index": 0 }]] } },
@@ -75,6 +75,9 @@ dùng `httpRequest` gọi thẳng API của dịch vụ đó.
   `respondToWebhook`. Mặc định dùng `"lastNode"`: nó đơn giản nhất và đủ cho
   hầu hết việc. Chỉ thêm node `respondToWebhook` khi đã đặt
   `"responseMode": "responseNode"`, và ngược lại.
+- **`set`** — `parameters.assignments.assignments` là mảng
+  `{ id, name, value, type }`; khoá lồng bên trong tên đúng là `assignments`,
+  viết khác đi thì node chạy xong mà không sinh ra trường nào và không báo lỗi.
 - **`code`** — `jsCode` phải `return` mảng `[{ json: {...} }]`, đọc input bằng
   `$input.all()`. Viết ngắn gọn, tránh template literal nhiều dòng có dấu
   tiếng Việt.
