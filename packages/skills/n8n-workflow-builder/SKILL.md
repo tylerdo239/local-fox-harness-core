@@ -1,69 +1,191 @@
 ---
 name: n8n-workflow-builder
-description: Xây dựng hoặc sửa workflow n8n qua các tool mcp__n8n__* một cách tiết kiệm context — tránh lỗi tràn context window (CONTEXT_WINDOW_EXCEEDED) đã gặp thật khi tạo workflow nhiều node. Dùng khi được yêu cầu tạo, sửa, hoặc mở rộng 1 workflow tự động hoá trong n8n.
+description: Xây dựng hoặc sửa workflow n8n qua các tool n8n_* — tra bảng node có sẵn thay vì đoán tên node, và tiết kiệm context để tránh lỗi tràn context window (CONTEXT_WINDOW_EXCEEDED). Dùng khi được yêu cầu tạo, sửa, hoặc mở rộng 1 workflow tự động hoá trong n8n.
 ---
 
-# n8n-workflow-builder — dùng tool MCP n8n tiết kiệm, tránh vỡ context
+# n8n-workflow-builder
 
-MCP server của n8n (các tool `mcp__n8n__*`) trả kết quả RẤT DÀI — dump nguyên
-TypeScript type definition kèm JSDoc cho mỗi node, toàn bộ tài liệu SDK... Gọi
-tràn lan hoặc thiếu kỷ luật sẽ làm hội thoại vỡ context window thật (đã xác
-nhận nhiều lần khi test) trước khi kịp tạo xong workflow. Theo đúng các quy
-tắc dưới đây — mỗi quy tắc đều dựa trên 1 lỗi thật đã xảy ra, không phải suy
-đoán.
+App này có ĐÚNG 7 tool n8n, không có tool nào khác:
 
-## Quy tắc bắt buộc
+| Tool | Tham số |
+| --- | --- |
+| `n8n_list_workflows` | (không có) |
+| `n8n_get_workflow` | `workflowId` |
+| `n8n_validate_workflow` | `workflow` |
+| `n8n_upsert_workflow` | `workflow`, `workflowId` (bỏ trống = tạo mới) |
+| `n8n_activate_workflow` | `workflowId` — **cần người duyệt**, sẽ dừng chờ |
+| `n8n_run_workflow` | `workflowId`, `payload` |
+| `n8n_get_execution` | `executionId` |
 
-1. **Không bao giờ gọi `get_workflow_sdk_reference` với `section: "all"`.**
-   Luôn chỉ định đúng 1 section cụ thể đang cần (`"patterns"`, `"guidelines"`,
-   `"design"`...), và mỗi section chỉ gọi ĐÚNG 1 LẦN trong cả cuộc hội thoại —
-   đừng gọi lại section đã đọc rồi.
-2. **Gộp nhiều node cần tra vào 1 lần gọi `search_nodes`/`get_node_types`**
-   (mảng `queries`/`nodeIds` nhận nhiều phần tử cùng lúc) thay vì gọi rải rác
-   nhiều lần cho từng node riêng lẻ.
-3. **Không tra lại thứ đã tra rồi trong cùng hội thoại.** Nếu đã gọi
-   `get_node_types` cho 1 node/discriminator, nhớ lấy thông tin đó dùng tiếp,
-   đừng gọi lại y hệt.
-3b. **`list_credentials` chỉ gọi ĐÚNG 1 LẦN cho mỗi credential type cần
-   dùng.** Lỗi thật đã gặp: gọi liền 3 lần với tham số hơi khác nhau
-   (`{query:"Gmail", type:"gmailOAuth2Api"}` rồi `{query:"Gmail"}` rồi
-   `{}`) chỉ để tìm credential Gmail — kết quả cả 3 lần đều rỗng như nhau.
-   Nếu lần gọi đầu tiên đã trả về rỗng, credential đó chưa tồn tại — đừng
-   thử lại với tham số khác, báo thẳng cho người dùng là cần tự kết nối
-   credential đó trong n8n UI trước.
-4. **Ưu tiên tạo workflow đơn giản trước** (vd chỉ trigger + 1-2 node cốt
-   lõi), **rồi mở rộng dần bằng các operation của `update_workflow`**
-   (addNode, addConnection, updateNodeParameters, setNodeParameter...) thay vì
-   cố viết 1 khối code phức tạp nhiều node ngay từ đầu. Mỗi lần gọi
-   `update_workflow` là 1 giao dịch atomic — lỗi ở đâu sửa đúng đó, không
-   phải viết lại toàn bộ từ đầu.
-5. **Code TypeScript viết ra phải ngắn gọn, không comment dài dòng.** Tránh
-   template literal nhiều dòng chứa văn bản tiếng Việt hoặc ngôn ngữ khác có
-   dấu — dễ vỡ cú pháp escape (lỗi thật đã gặp: "Unterminated string
-   constant" vì nhúng đoạn văn tiếng Việt trực tiếp vào template literal).
-   Nếu cần nội dung dài bằng ngôn ngữ khác, đặt vào 1 biến string đơn giản
-   trên 1 dòng, tránh nhúng trực tiếp nhiều dòng.
-6. **Nếu gặp lỗi `CONTEXT_WINDOW_EXCEEDED` giữa chừng:** đừng lặp lại các
-   bước nghiên cứu đã làm ở lượt trước — tự tóm tắt lại bằng lời những gì đã
-   biết, rồi đi thẳng vào bước tiếp theo (`create_workflow_from_code` hoặc
-   `update_workflow`) thay vì tra cứu lại từ đầu.
-7. Luôn `validate_workflow`/spot-check `validate_node_config` trước khi
-   `create_workflow_from_code` — bắt lỗi sớm, tránh phải viết lại cả khối
-   code chỉ vì 1 lỗi nhỏ.
-8. **Không bao giờ gọi tool tạo workflow (`n8n_upsert_workflow` không kèm
-   `workflowId`, hoặc `create_workflow_from_code`) 2 lần cho cùng 1 workflow
-   trong cùng 1 hội thoại.** Lỗi thật đã gặp: model gọi tạo 2 lần (thường vì
-   quên mất id đã trả về ở lần gọi trước, hay gặp sau nhiều bước xây dựng
-   dài) → n8n tạo ra 2 workflow giống hệt nhau vì n8n không tự chặn trùng
-   tên. Ngay khi tạo thành công, LƯU LẠI `id` trả về và dùng nó
-   (`workflowId`/`update_workflow`) cho MỌI thay đổi tiếp theo trong cùng
-   hội thoại — không bao giờ gọi lại tool tạo mới cho cùng 1 workflow.
-   (`n8n_upsert_workflow` của app này có tự kiểm tra trùng theo tên trong
-   cùng session làm lưới an toàn — nhưng đừng dựa vào đó, tự nhớ id vẫn là
-   cách đúng và nhanh hơn.)
-9. **Sau khi tạo/sửa workflow thành công, LUÔN đưa link mở workflow vào câu
-   trả lời cuối cùng cho user dưới dạng markdown link** (vd
-   `[Mở workflow trong n8n](<url>)`), không chỉ trả về JSON thô. Dùng đúng
-   `editorUrl` trong kết quả trả về nếu gọi `n8n_upsert_workflow`; nếu dùng
-   tool MCP (`create_workflow_from_code`/`publish_workflow`), tự ghép
-   `<n8n-instance-url>/workflow/<id>` từ id trả về.
+**Không có tool nào để tra cứu node.** Không có `search_nodes`, `get_node_types`,
+`list_credentials`, `get_workflow_sdk_reference`, `create_workflow_from_code`.
+Gọi chúng sẽ lỗi. Tên node phải lấy từ bảng dưới đây.
+
+## Bảng tra node — đừng đoán tên
+
+Đo trực tiếp từ `n8n-nodes-base` 2.39.6 trong container ngày 2026-09-20.
+`type` **luôn** có tiền tố `n8n-nodes-base.` và là tên kỹ thuật, **không phải
+tên hiển thị trên UI**. Đây là cái bẫy đã gây lỗi thật: UI ghi "Edit Fields"
+nên model viết `n8n-nodes-base.editFields` → `Unrecognized node type`. Tên đúng
+là `n8n-nodes-base.set`.
+
+| Việc cần làm | `type` (bỏ tiền tố `n8n-nodes-base.`) | Tên trên UI | `typeVersion` mới nhất |
+| --- | --- | --- | --- |
+| Nhận HTTP request (trigger) | `webhook` | Webhook | 2.1 |
+| Chạy tay để thử | `manualTrigger` | Manual Trigger | 1 |
+| Chạy theo lịch | `scheduleTrigger` | Schedule Trigger | 1.4 |
+| Gán / đổi tên trường | `set` | **Edit Fields (Set)** | 3.5 |
+| Viết JavaScript | `code` | Code | 2 |
+| Gọi API ngoài | `httpRequest` | HTTP Request | 4.5 |
+| Rẽ 2 nhánh đúng/sai | `if` | If | 2.3 |
+| Rẽ nhiều nhánh | `switch` | Switch | 3.4 |
+| Lọc bỏ item | `filter` | Filter | 2.3 |
+| Gộp 2 luồng | `merge` | Merge | 3.2 |
+| Lặp theo lô | `splitInBatches` | Loop Over Items | 3 |
+| Trả HTTP response tuỳ ý | `respondToWebhook` | Respond to Webhook | 1.5 |
+| Chờ | `wait` | Wait | 1.1 |
+| Không làm gì | `noOp` | No Operation | 1 |
+| Gọi workflow khác | `executeWorkflow` | Execute Sub-workflow | 1.3 |
+
+Những tên node **KHÔNG tồn tại** (đã bị model bịa ra trong lúc test):
+`editFields`, `return`, `function`, `setNode`.
+
+## Khung workflow đúng
+
+Đây là workflow đã chạy thật và trả về kết quả (`{"ket_qua":"chay duoc"}`,
+HTTP 200) — copy khung này rồi sửa, đừng viết lại từ đầu:
+
+```json
+{
+  "name": "ten-workflow",
+  "nodes": [
+    {
+      "id": "1",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 0],
+      "parameters": { "httpMethod": "POST", "path": "ten-workflow", "responseMode": "lastNode" }
+    },
+    {
+      "id": "2",
+      "name": "Set",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [220, 0],
+      "parameters": {
+        "assignments": { "assignment": [{ "id": "1", "name": "ket_qua", "value": "chay duoc" }] }
+      }
+    },
+    {
+      "id": "3",
+      "name": "Code",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [440, 0],
+      "parameters": { "jsCode": "return [{ json: { ket_qua: 'chay duoc' } }];" }
+    }
+  ],
+  "connections": {
+    "Webhook": { "main": [[{ "node": "Set", "type": "main", "index": 0 }]] },
+    "Set": { "main": [[{ "node": "Code", "type": "main", "index": 0 }]] }
+  },
+  "settings": {}
+}
+```
+
+Luật của khung này:
+
+- `position` **bắt buộc** là mảng 2 số `[x, y]`. Thiếu 1 số → lỗi
+  `nodes[N].position must be a [x, y] pair`. Cách xa nhau 220px cho dễ nhìn.
+- `connections` khoá theo **`name` của node**, không phải `id`. `main` là
+  mảng-của-mảng: `main[0]` là output thứ nhất. Node `if` có 2 output
+  (`main[0]` = true, `main[1]` = false), node `switch` có nhiều output.
+- Node cuối cùng không xuất hiện trong `connections`.
+- **Không đưa `id` của workflow vào trong object `workflow`** — n8n trả lỗi
+  `request/body/id is read-only`. Muốn sửa workflow cũ thì truyền id qua tham
+  số `workflowId` của `n8n_upsert_workflow`.
+
+## Tham số của các node hay dùng
+
+**`webhook`** — `httpMethod`: `GET|POST|PUT|PATCH|DELETE|HEAD`. `path`: chuỗi,
+là phần cuối của URL. `responseMode`:
+
+- `onReceived` (mặc định) — trả ngay `{"message":"Workflow was started"}`,
+  **không** trả kết quả tính toán.
+- `lastNode` — trả output của node cuối. Đây là cái bạn muốn khi cần xem kết quả.
+- `responseNode` — cần có thêm node `respondToWebhook`. Nếu đặt node
+  `respondToWebhook` mà `responseMode` không phải `responseNode`, n8n báo
+  `Unused Respond to Webhook node found in the workflow`.
+
+**`set`** — `assignments.assignment` là mảng `{id, name, value}`. Thêm
+`"type": "string"` (hoặc `number`, `boolean`, `object`, `array`) nếu muốn ép kiểu.
+
+**`code`** — `jsCode` là chuỗi JavaScript, phải `return` một mảng
+`[{ json: {...} }]`. Đọc input bằng `$input.all()`. Muốn Python thì thêm
+`"language": "pythonNative"` và dùng `pythonCode` thay cho `jsCode`.
+
+**`if` / `filter` / `switch`** — điều kiện dùng chung một hình dạng:
+
+```json
+{
+  "options": { "caseSensitive": true, "typeValidation": "strict", "version": 2 },
+  "conditions": [
+    {
+      "leftValue": "={{ $json.trang_thai }}",
+      "rightValue": "ok",
+      "operator": { "type": "string", "operation": "equals" }
+    }
+  ],
+  "combinator": "and"
+}
+```
+
+Đặt object này vào `parameters.conditions` (với `if`/`filter`), hoặc vào
+`parameters.rules.values[N].conditions` (với `switch`).
+
+**`httpRequest`** — `method`, `url`. Muốn gửi body thì bật `sendBody: true`;
+muốn gửi header thì `sendHeaders: true`.
+
+Biểu thức n8n viết dạng `"={{ $json.ten_truong }}"` — dấu `=` mở đầu là bắt buộc,
+thiếu nó thì n8n hiểu là chuỗi văn bản thường.
+
+## Thứ tự làm việc
+
+1. `n8n_validate_workflow` **trước** mỗi lần `n8n_upsert_workflow`. Validate
+   không tốn gì và bắt được lỗi cấu trúc ngay.
+2. `n8n_upsert_workflow` → **lưu lại `id` trả về**.
+3. `n8n_activate_workflow` — tool này **dừng lại chờ người duyệt**. Đó là hành
+   vi đúng, không phải treo. Nếu không thấy trả về, người dùng chưa bấm duyệt.
+4. `n8n_run_workflow` chỉ chạy được workflow **đã active** và **có node
+   `webhook`**. n8n không có endpoint chạy workflow chung; tool này đọc `path`
+   của node webhook rồi POST thẳng vào đó.
+5. `n8n_get_execution` hiện **không dùng được sau khi chạy**: `n8n_run_workflow`
+   không trả về `executionId` và không có tool liệt kê execution. Muốn xem kết
+   quả thì đặt `responseMode: lastNode` và đọc `body` mà `n8n_run_workflow` trả về.
+
+## Kỷ luật để không vỡ context
+
+Mỗi lần gọi tool n8n trả về nguyên JSON workflow, rất dài. Đã gặp lỗi
+`CONTEXT_WINDOW_EXCEEDED` thật khi xây workflow nhiều node.
+
+1. **Tạo workflow đơn giản trước** (trigger + 1–2 node), chạy thử, rồi mở rộng
+   dần bằng `n8n_upsert_workflow` kèm `workflowId`.
+2. **Không bao giờ gọi `n8n_upsert_workflow` thiếu `workflowId` hai lần cho cùng
+   một workflow.** Lỗi thật: model quên id đã trả về nên gọi tạo lần hai → n8n
+   tạo ra 2 workflow trùng nhau vì nó không chặn trùng tên. (Tool này có tự dò
+   trùng theo tên trong cùng session làm lưới an toàn — nhưng tự nhớ id vẫn
+   đúng và nhanh hơn.)
+3. **Không gọi lại `n8n_get_workflow` cho workflow mình vừa upsert** — nội dung
+   chính là cái mình vừa gửi đi.
+4. Nếu lỡ vỡ context: đừng tra cứu lại từ đầu, tóm tắt bằng lời những gì đã biết
+   rồi đi thẳng vào bước tiếp theo.
+5. **Code trong `jsCode` viết ngắn, không comment dài.** Tránh template literal
+   nhiều dòng chứa tiếng Việt có dấu — đã gặp lỗi thật "Unterminated string
+   constant". Cần chuỗi dài thì đặt vào một biến trên một dòng.
+
+## Trả lời người dùng
+
+Sau khi tạo/sửa thành công, **luôn đưa link mở workflow dưới dạng markdown link**
+(vd `[Mở workflow trong n8n](<url>)`), lấy đúng `editorUrl` trong kết quả
+`n8n_upsert_workflow` — đừng chỉ dán JSON thô.

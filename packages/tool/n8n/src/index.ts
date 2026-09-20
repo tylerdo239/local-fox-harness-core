@@ -112,6 +112,13 @@ interface N8nTag { readonly id: string; readonly name: string }
 interface N8nNode { readonly name: string; readonly type: string; readonly parameters?: Record<string, unknown> }
 interface N8nWorkflow { readonly id: string; readonly name: string; readonly active: boolean; readonly nodes: readonly N8nNode[] }
 
+// LƯU Ý (2026-09-19, chưa sửa): fetch() dưới đây không có `signal` và không có
+// timeout. n8n không trả lời thì tool treo vô hạn và kéo theo cả lượt chat —
+// người dùng chỉ thấy màn hình đứng im, không thông báo gì. Chưa quan sát thấy
+// xảy ra thật (lần nghi treo hoá ra là cổng duyệt của n8n_activate_workflow
+// đang chờ người bấm, xem ghi chú ở tool đó), nên đây là rủi ro tiềm ẩn chứ
+// không phải lỗi đã tái hiện được. Sửa: truyền AbortSignal.timeout(...) vào,
+// lấy hạn từ config.
 async function n8nRequest(ctx: Context, config: Config, path: string, init?: RequestInit): Promise<unknown> {
   const credential = await ctx.credentials.resolve(credentialRef(config.apiKeyEnv))
   if (credential === undefined || credential.value === '') {
@@ -546,6 +553,11 @@ export function apply(ctx: Context, config: Config): void {
     parameters: { workflowId: { type: 'string', required: true } },
     output: { schema: { type: 'json' }, render: renderJson },
     async execute(args, exec) {
+      // Cổng duyệt này chạy TRƯỚC lời gọi HTTP, và đó là hành vi đúng: kích
+      // hoạt workflow là bật trigger chạy thật. Ghi lại vì nó từng làm tôi
+      // chẩn đoán nhầm: gõ chat qua REST API mà không trả lời
+      // /session-approval-respond thì lượt đứng im vô hạn, nhìn y hệt n8n bị
+      // treo. Duyệt xong thì activate trả về active: true trong ~1 giây.
       if (exec.agent === undefined) throw new Error('n8n_activate_workflow requires an active agent context')
       const outcome = await ctx.approval.request({
         agent: exec.agent,
@@ -560,6 +572,14 @@ export function apply(ctx: Context, config: Config): void {
   })), 'cordis-n8n: n8n_activate_workflow')
 
   ctx.effect(() => ctx.tools.register(defineTool({
+    // LƯU Ý (2026-09-19, chưa sửa): tool này trả về đúng phản hồi của webhook,
+    // thường là {"message": "Workflow was started"} — KHÔNG có executionId. Mà
+    // composition này cũng không có tool nào liệt kê executions, nên sau khi
+    // chạy xong thì n8n_get_execution gần như không dùng được: không có cách
+    // nào biết id để đọc. Xác nhận bằng một lượt chạy thật: model kích hoạt và
+    // chạy workflow thành công, tới bước đọc kết quả thì bí và phải hỏi lại
+    // người dùng. Sửa: hoặc thêm n8n_list_executions, hoặc đọc executionId từ
+    // phản hồi khi webhook đặt responseMode: lastNode.
     name: 'n8n_run_workflow',
     description: 'Trigger an active n8n workflow that has a Webhook trigger node. n8n\'s REST API has no generic "run" endpoint — this reads the workflow\'s own Webhook node path and POSTs to it directly.',
     parameters: {
