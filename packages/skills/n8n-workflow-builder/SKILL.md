@@ -1,191 +1,84 @@
 ---
 name: n8n-workflow-builder
-description: Xây dựng hoặc sửa workflow n8n qua các tool n8n_* — tra bảng node có sẵn thay vì đoán tên node, và tiết kiệm context để tránh lỗi tràn context window (CONTEXT_WINDOW_EXCEEDED). Dùng khi được yêu cầu tạo, sửa, hoặc mở rộng 1 workflow tự động hoá trong n8n.
+description: Tạo, sửa và chạy thử workflow tự động hoá trong n8n qua các tool n8n_* — dựng JSON đúng cấu trúc, chạy thử lấy kết quả thật, rồi trả link mở workflow. Dùng khi người dùng cần một luồng tự động trong n8n, ví dụ "tạo workflow", "tự động hoá", "nối webhook với ...".
 ---
 
 # n8n-workflow-builder
 
-App này có ĐÚNG 7 tool n8n, không có tool nào khác:
+App này có bảy tool: `n8n_list_workflows`, `n8n_get_workflow`,
+`n8n_validate_workflow`, `n8n_upsert_workflow`, `n8n_activate_workflow`,
+`n8n_run_workflow`, `n8n_get_execution`. Không có tool nào tra cứu danh mục
+node — tên node phải viết đúng ngay từ đầu, xem mục dưới.
 
-| Tool | Tham số |
-| --- | --- |
-| `n8n_list_workflows` | (không có) |
-| `n8n_get_workflow` | `workflowId` |
-| `n8n_validate_workflow` | `workflow` |
-| `n8n_upsert_workflow` | `workflow`, `workflowId` (bỏ trống = tạo mới) |
-| `n8n_activate_workflow` | `workflowId` — **cần người duyệt**, sẽ dừng chờ |
-| `n8n_run_workflow` | `workflowId`, `payload` |
-| `n8n_get_execution` | `executionId` |
+## Quy trình
 
-**Không có tool nào để tra cứu node.** Không có `search_nodes`, `get_node_types`,
-`list_credentials`, `get_workflow_sdk_reference`, `create_workflow_from_code`.
-Gọi chúng sẽ lỗi. Tên node phải lấy từ bảng dưới đây.
+1. **Dựng workflow nhỏ nhất chạy được trước** — trigger cộng một hai node cốt
+   lõi. Mở rộng dần bằng `n8n_upsert_workflow` kèm `workflowId`, mỗi lần thêm
+   một việc.
+2. `n8n_validate_workflow` trước mỗi lần upsert. Không tốn gì, bắt lỗi cấu
+   trúc ngay.
+3. `n8n_upsert_workflow` — **lưu lại `id` trả về** và dùng nó cho mọi thay đổi
+   sau đó. Gọi lại mà không truyền `workflowId` sẽ tạo ra workflow thứ hai.
+4. `n8n_activate_workflow` cần người dùng bấm duyệt, nên nó dừng chờ; workflow
+   chưa active thì webhook trả 404.
+5. `n8n_run_workflow` chạy workflow đã active và có node `webhook`. Đọc `body`
+   trong kết quả để lấy đầu ra thật.
+6. Trả về cho người dùng kèm link markdown mở workflow, lấy `editorUrl` trong
+   kết quả upsert.
 
-## Bảng tra node — đừng đoán tên
+## Viết node cho đúng
 
-Đo trực tiếp từ `n8n-nodes-base` 2.39.6 trong container ngày 2026-09-20.
-`type` **luôn** có tiền tố `n8n-nodes-base.` và là tên kỹ thuật, **không phải
-tên hiển thị trên UI**. Đây là cái bẫy đã gây lỗi thật: UI ghi "Edit Fields"
-nên model viết `n8n-nodes-base.editFields` → `Unrecognized node type`. Tên đúng
-là `n8n-nodes-base.set`.
+`type` là tên kỹ thuật có tiền tố `n8n-nodes-base.`, **không phải tên hiển thị
+trên giao diện n8n**. Các node thường dùng, kèm `typeVersion` nên đặt:
 
-| Việc cần làm | `type` (bỏ tiền tố `n8n-nodes-base.`) | Tên trên UI | `typeVersion` mới nhất |
-| --- | --- | --- | --- |
-| Nhận HTTP request (trigger) | `webhook` | Webhook | 2.1 |
-| Chạy tay để thử | `manualTrigger` | Manual Trigger | 1 |
-| Chạy theo lịch | `scheduleTrigger` | Schedule Trigger | 1.4 |
-| Gán / đổi tên trường | `set` | **Edit Fields (Set)** | 3.5 |
-| Viết JavaScript | `code` | Code | 2 |
-| Gọi API ngoài | `httpRequest` | HTTP Request | 4.5 |
-| Rẽ 2 nhánh đúng/sai | `if` | If | 2.3 |
-| Rẽ nhiều nhánh | `switch` | Switch | 3.4 |
-| Lọc bỏ item | `filter` | Filter | 2.3 |
-| Gộp 2 luồng | `merge` | Merge | 3.2 |
-| Lặp theo lô | `splitInBatches` | Loop Over Items | 3 |
-| Trả HTTP response tuỳ ý | `respondToWebhook` | Respond to Webhook | 1.5 |
-| Chờ | `wait` | Wait | 1.1 |
-| Không làm gì | `noOp` | No Operation | 1 |
-| Gọi workflow khác | `executeWorkflow` | Execute Sub-workflow | 1.3 |
+`webhook` 2 · `manualTrigger` 1 · `scheduleTrigger` 1.2 · `set` 3.4 (giao diện
+gọi là "Edit Fields") · `code` 2 · `httpRequest` 4.2 · `if` 2.2 · `switch` 3.2
+· `filter` 2.2 · `merge` 3.1 · `splitInBatches` 3 (giao diện gọi là "Loop Over
+Items") · `respondToWebhook` 1.4 · `wait` 1.1 · `noOp` 1 · `executeWorkflow` 1.2
 
-Những tên node **KHÔNG tồn tại** (đã bị model bịa ra trong lúc test):
-`editFields`, `return`, `function`, `setNode`.
+Node nào không nằm trong danh sách này thì hỏi người dùng tên chính xác hoặc
+dùng `httpRequest` gọi thẳng API của dịch vụ đó.
 
-## Khung workflow đúng
-
-Đây là workflow đã chạy thật và trả về kết quả (`{"ket_qua":"chay duoc"}`,
-HTTP 200) — copy khung này rồi sửa, đừng viết lại từ đầu:
+## Cấu trúc workflow
 
 ```json
 {
   "name": "ten-workflow",
   "nodes": [
-    {
-      "id": "1",
-      "name": "Webhook",
-      "type": "n8n-nodes-base.webhook",
-      "typeVersion": 2,
+    { "id": "1", "name": "Webhook", "type": "n8n-nodes-base.webhook", "typeVersion": 2,
       "position": [0, 0],
-      "parameters": { "httpMethod": "POST", "path": "ten-workflow", "responseMode": "lastNode" }
-    },
-    {
-      "id": "2",
-      "name": "Set",
-      "type": "n8n-nodes-base.set",
-      "typeVersion": 3.4,
+      "parameters": { "httpMethod": "POST", "path": "ten-workflow", "responseMode": "lastNode" } },
+    { "id": "2", "name": "Set", "type": "n8n-nodes-base.set", "typeVersion": 3.4,
       "position": [220, 0],
-      "parameters": {
-        "assignments": { "assignment": [{ "id": "1", "name": "ket_qua", "value": "chay duoc" }] }
-      }
-    },
-    {
-      "id": "3",
-      "name": "Code",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [440, 0],
-      "parameters": { "jsCode": "return [{ json: { ket_qua: 'chay duoc' } }];" }
-    }
+      "parameters": { "assignments": { "assignment": [
+        { "id": "1", "name": "ket_qua", "value": "xong", "type": "string" } ] } } }
   ],
-  "connections": {
-    "Webhook": { "main": [[{ "node": "Set", "type": "main", "index": 0 }]] },
-    "Set": { "main": [[{ "node": "Code", "type": "main", "index": 0 }]] }
-  },
+  "connections": { "Webhook": { "main": [[{ "node": "Set", "type": "main", "index": 0 }]] } },
   "settings": {}
 }
 ```
 
-Luật của khung này:
+- `position` là cặp `[x, y]`; cách nhau 220px cho dễ đọc trên giao diện.
+- `connections` khoá theo **`name`** của node. `main` là mảng-của-mảng:
+  `main[0]` là output thứ nhất. `if` có hai output (true, false), `switch` có
+  nhiều. Node cuối không xuất hiện trong `connections`.
+- `id` của workflow chỉ truyền qua tham số `workflowId`, không đặt trong JSON.
 
-- `position` **bắt buộc** là mảng 2 số `[x, y]`. Thiếu 1 số → lỗi
-  `nodes[N].position must be a [x, y] pair`. Cách xa nhau 220px cho dễ nhìn.
-- `connections` khoá theo **`name` của node**, không phải `id`. `main` là
-  mảng-của-mảng: `main[0]` là output thứ nhất. Node `if` có 2 output
-  (`main[0]` = true, `main[1]` = false), node `switch` có nhiều output.
-- Node cuối cùng không xuất hiện trong `connections`.
-- **Không đưa `id` của workflow vào trong object `workflow`** — n8n trả lỗi
-  `request/body/id is read-only`. Muốn sửa workflow cũ thì truyền id qua tham
-  số `workflowId` của `n8n_upsert_workflow`.
+## Tham số hay cần
 
-## Tham số của các node hay dùng
+- **`webhook`** — `responseMode` quyết định người gọi nhận được gì:
+  `onReceived` chỉ báo đã nhận, `lastNode` trả output của node cuối (dùng cái
+  này khi cần xem kết quả), `responseNode` trả theo node `respondToWebhook` —
+  và chỉ khi đó mới được đặt node `respondToWebhook`.
+- **`code`** — `jsCode` phải `return` mảng `[{ json: {...} }]`, đọc input bằng
+  `$input.all()`. Viết ngắn gọn, tránh template literal nhiều dòng có dấu
+  tiếng Việt.
+- **`if` / `filter` / `switch`** — điều kiện dạng
+  `{ "options": { "caseSensitive": true, "typeValidation": "strict", "version": 2 },
+  "conditions": [{ "leftValue": "={{ $json.x }}", "rightValue": "y",
+  "operator": { "type": "string", "operation": "equals" } }], "combinator": "and" }`.
+  Đặt vào `parameters.conditions`, riêng `switch` đặt vào
+  `parameters.rules.values[N].conditions`.
 
-**`webhook`** — `httpMethod`: `GET|POST|PUT|PATCH|DELETE|HEAD`. `path`: chuỗi,
-là phần cuối của URL. `responseMode`:
-
-- `onReceived` (mặc định) — trả ngay `{"message":"Workflow was started"}`,
-  **không** trả kết quả tính toán.
-- `lastNode` — trả output của node cuối. Đây là cái bạn muốn khi cần xem kết quả.
-- `responseNode` — cần có thêm node `respondToWebhook`. Nếu đặt node
-  `respondToWebhook` mà `responseMode` không phải `responseNode`, n8n báo
-  `Unused Respond to Webhook node found in the workflow`.
-
-**`set`** — `assignments.assignment` là mảng `{id, name, value}`. Thêm
-`"type": "string"` (hoặc `number`, `boolean`, `object`, `array`) nếu muốn ép kiểu.
-
-**`code`** — `jsCode` là chuỗi JavaScript, phải `return` một mảng
-`[{ json: {...} }]`. Đọc input bằng `$input.all()`. Muốn Python thì thêm
-`"language": "pythonNative"` và dùng `pythonCode` thay cho `jsCode`.
-
-**`if` / `filter` / `switch`** — điều kiện dùng chung một hình dạng:
-
-```json
-{
-  "options": { "caseSensitive": true, "typeValidation": "strict", "version": 2 },
-  "conditions": [
-    {
-      "leftValue": "={{ $json.trang_thai }}",
-      "rightValue": "ok",
-      "operator": { "type": "string", "operation": "equals" }
-    }
-  ],
-  "combinator": "and"
-}
-```
-
-Đặt object này vào `parameters.conditions` (với `if`/`filter`), hoặc vào
-`parameters.rules.values[N].conditions` (với `switch`).
-
-**`httpRequest`** — `method`, `url`. Muốn gửi body thì bật `sendBody: true`;
-muốn gửi header thì `sendHeaders: true`.
-
-Biểu thức n8n viết dạng `"={{ $json.ten_truong }}"` — dấu `=` mở đầu là bắt buộc,
-thiếu nó thì n8n hiểu là chuỗi văn bản thường.
-
-## Thứ tự làm việc
-
-1. `n8n_validate_workflow` **trước** mỗi lần `n8n_upsert_workflow`. Validate
-   không tốn gì và bắt được lỗi cấu trúc ngay.
-2. `n8n_upsert_workflow` → **lưu lại `id` trả về**.
-3. `n8n_activate_workflow` — tool này **dừng lại chờ người duyệt**. Đó là hành
-   vi đúng, không phải treo. Nếu không thấy trả về, người dùng chưa bấm duyệt.
-4. `n8n_run_workflow` chỉ chạy được workflow **đã active** và **có node
-   `webhook`**. n8n không có endpoint chạy workflow chung; tool này đọc `path`
-   của node webhook rồi POST thẳng vào đó.
-5. `n8n_get_execution` hiện **không dùng được sau khi chạy**: `n8n_run_workflow`
-   không trả về `executionId` và không có tool liệt kê execution. Muốn xem kết
-   quả thì đặt `responseMode: lastNode` và đọc `body` mà `n8n_run_workflow` trả về.
-
-## Kỷ luật để không vỡ context
-
-Mỗi lần gọi tool n8n trả về nguyên JSON workflow, rất dài. Đã gặp lỗi
-`CONTEXT_WINDOW_EXCEEDED` thật khi xây workflow nhiều node.
-
-1. **Tạo workflow đơn giản trước** (trigger + 1–2 node), chạy thử, rồi mở rộng
-   dần bằng `n8n_upsert_workflow` kèm `workflowId`.
-2. **Không bao giờ gọi `n8n_upsert_workflow` thiếu `workflowId` hai lần cho cùng
-   một workflow.** Lỗi thật: model quên id đã trả về nên gọi tạo lần hai → n8n
-   tạo ra 2 workflow trùng nhau vì nó không chặn trùng tên. (Tool này có tự dò
-   trùng theo tên trong cùng session làm lưới an toàn — nhưng tự nhớ id vẫn
-   đúng và nhanh hơn.)
-3. **Không gọi lại `n8n_get_workflow` cho workflow mình vừa upsert** — nội dung
-   chính là cái mình vừa gửi đi.
-4. Nếu lỡ vỡ context: đừng tra cứu lại từ đầu, tóm tắt bằng lời những gì đã biết
-   rồi đi thẳng vào bước tiếp theo.
-5. **Code trong `jsCode` viết ngắn, không comment dài.** Tránh template literal
-   nhiều dòng chứa tiếng Việt có dấu — đã gặp lỗi thật "Unterminated string
-   constant". Cần chuỗi dài thì đặt vào một biến trên một dòng.
-
-## Trả lời người dùng
-
-Sau khi tạo/sửa thành công, **luôn đưa link mở workflow dưới dạng markdown link**
-(vd `[Mở workflow trong n8n](<url>)`), lấy đúng `editorUrl` trong kết quả
-`n8n_upsert_workflow` — đừng chỉ dán JSON thô.
+Biểu thức n8n viết dạng `"={{ $json.ten_truong }}"` — thiếu dấu `=` mở đầu thì
+n8n hiểu là chuỗi văn bản thường.
