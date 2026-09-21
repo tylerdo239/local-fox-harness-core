@@ -99,6 +99,7 @@ export const vi = {
   'automations.active': 'đang bật',
   'automations.inactive': 'đang tắt',
   'automations.openInN8n': 'Mở trong n8n',
+  'automations.openN8nHome': 'Mở n8n',
   'automations.recentExecutions': 'Lần chạy gần đây',
   'automations.noExecutions': 'Chưa có lần chạy nào.',
 
@@ -236,6 +237,7 @@ export const en: Record<TranslationKey, string> = {
   'automations.active': 'active',
   'automations.inactive': 'inactive',
   'automations.openInN8n': 'Open in n8n',
+  'automations.openN8nHome': 'Open n8n',
   'automations.recentExecutions': 'Recent executions',
   'automations.noExecutions': 'No executions yet.',
 

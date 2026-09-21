@@ -10,6 +10,8 @@ import { ExternalLink } from 'lucide-react'
 import { listAutomations, listAutomationExecutions, type Automation } from '../../../lib/api'
 import { useLocale } from '../../../lib/i18n/locale'
 
+const N8N_WORKFLOWS_URL = 'http://127.0.0.1:5678/home/workflows'
+
 function ExecutionsPanel({ workflow }: { workflow: Automation }) {
   const { t } = useLocale()
   const executions = useQuery({
@@ -46,9 +48,20 @@ export function Automations() {
   return (
     <div className="h-full overflow-y-auto bg-bg p-6">
       <div className="mx-auto flex w-full max-w-2xl flex-col gap-6">
-        <div>
-          <h1 className="text-lg font-semibold text-fg">{t('automations.title')}</h1>
-          <p className="mt-1 text-xs text-muted">{t('automations.readonlyHint')}</p>
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h1 className="text-lg font-semibold text-fg">{t('automations.title')}</h1>
+            <p className="mt-1 text-xs text-muted">{t('automations.readonlyHint')}</p>
+          </div>
+          <a
+            href={N8N_WORKFLOWS_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex flex-none items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-sm font-medium text-fg transition-colors duration-100 ease-fh hover:bg-bg-hover"
+          >
+            {t('automations.openN8nHome')}
+            <ExternalLink size={16} />
+          </a>
         </div>
 
         {automations.isLoading ? <p className="text-sm text-muted">{t('automations.loading')}</p> : null}
