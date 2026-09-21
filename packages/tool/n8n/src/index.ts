@@ -270,6 +270,18 @@ async function getOrCreateTag(ctx: Context, config: Config, tagName: string): Pr
  * parsing it once before validating — a malformed string still fails
  * validation the same way it would have unparsed.
  */
+// Writable top-level fields of n8n's workflow schema (public-api openapi.yml);
+// the rest (id, active, triggerCount, versionId, ...) are readOnly and a body
+// carrying any of them is rejected. Models routinely echo a workflow straight
+// from n8n_get_workflow, so the upsert keeps only these. settings is required.
+const WRITABLE_WORKFLOW_FIELDS = ['name', 'description', 'parentFolderId', 'nodes', 'connections', 'nodeGroups', 'settings', 'staticData', 'pinData']
+
+function writableWorkflow(workflow: Record<string, unknown>): Record<string, unknown> {
+  const body: Record<string, unknown> = { settings: {} }
+  for (const field of WRITABLE_WORKFLOW_FIELDS) if (workflow[field] !== undefined) body[field] = workflow[field]
+  return body
+}
+
 function coerceJsonArg(value: unknown): unknown {
   if (typeof value !== 'string') return value
   try {
@@ -307,6 +319,14 @@ function checkFlow(nodes: readonly { name: string; type: string; parameters?: Re
       errors.push(`nodes not connected to any trigger, so they never run: ${orphans.join(', ')} — add them to connections`)
     }
   }
+  // respondWith defaults to firstIncomingItem, which echoes the request back
+  // and silently ignores responseBody.
+  for (const respond of nodes.filter(node => node.type === RESPOND_TYPE)) {
+    const respondWith = respond.parameters?.respondWith
+    if (respond.parameters?.responseBody !== undefined && respondWith !== 'json' && respondWith !== 'text') {
+      errors.push(`respondToWebhook "${respond.name}" has a responseBody but respondWith is ${JSON.stringify(respondWith ?? 'firstIncomingItem')}, so the body is ignored — set "respondWith": "json" (or "text")`)
+    }
+  }
   const hasRespond = nodes.some(node => node.type === RESPOND_TYPE)
   for (const webhook of nodes.filter(node => node.type === WEBHOOK_TYPE)) {
     const mode = webhook.parameters?.responseMode ?? 'onReceived'
@@ -323,6 +343,11 @@ function checkFlow(nodes: readonly { name: string; type: string; parameters?: Re
 /** Local structural check before any round trip — n8n itself would reject a malformed workflow, but with a less actionable error. */
 function validateWorkflowStructure(workflow: unknown): { valid: boolean; errors: string[] } {
   const errors: string[] = []
+  if (typeof workflow === 'string') {
+    let reason = 'it parses to a non-object'
+    try { JSON.parse(workflow) } catch (error) { reason = error instanceof Error ? error.message : String(error) }
+    return { valid: false, errors: [`workflow is not a valid JSON object: ${reason}`] }
+  }
   if (typeof workflow !== 'object' || workflow === null) return { valid: false, errors: ['workflow must be a JSON object'] }
   const w = workflow as Record<string, unknown>
   if (typeof w.name !== 'string' || w.name.trim() === '') errors.push('name must be a non-empty string')
@@ -703,8 +728,8 @@ export function apply(ctx: Context, config: Config): void {
         description: entry.description,
         defaultVersion: entry.defaultVersion,
         availableVersions: entry.versionGroups.flatMap((g) => g.versions),
-        builderHint: entry.builderHint,
-        matchedVersions: group?.versions,
+        ...(entry.builderHint !== undefined ? { builderHint: entry.builderHint } : {}),
+        ...(group !== undefined ? { matchedVersions: group.versions } : {}),
         properties: group?.properties ?? [],
       })
     },
@@ -795,14 +820,14 @@ export function apply(ctx: Context, config: Config): void {
       if (workflowId !== undefined) {
         const updated = await n8nRequest(ctx, config, `/workflows/${encodeURIComponent(workflowId)}`, {
           method: 'PUT',
-          body: JSON.stringify(workflow),
+          body: JSON.stringify(writableWorkflow(workflow as Record<string, unknown>)),
         }) as N8nWorkflow
         if (sessionId !== undefined) rememberSessionWorkflow(sessionId, updated.id, updated.name)
         return asJson({ ...updated, editorUrl: editorWorkflowUrl(config, updated.id) })
       }
       const created = await n8nRequest(ctx, config, '/workflows', {
         method: 'POST',
-        body: JSON.stringify(workflow),
+        body: JSON.stringify(writableWorkflow(workflow as Record<string, unknown>)),
       }) as N8nWorkflow
       // Đợt 13 — dropped the 'agent-generated' tag (user request: "bỏ việc
       // đánh tag agent-generated đi"); session:<id> stays, it's still real
@@ -889,7 +914,9 @@ export function apply(ctx: Context, config: Config): void {
         headers: { 'content-type': 'application/json' },
         body: bodyless || payload === undefined ? undefined : JSON.stringify(payload),
       })
-      const responseBody: unknown = await response.json().catch(async () => response.text())
+      const text = await response.text()
+      let responseBody: unknown = text
+      try { responseBody = JSON.parse(text) } catch { /* not JSON — keep the text */ }
       const execution = await waitForExecution(ctx, config, args.workflowId, before)
       return asJson({
         status: response.status,
