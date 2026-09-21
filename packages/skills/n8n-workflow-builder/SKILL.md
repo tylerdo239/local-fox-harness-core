@@ -86,7 +86,44 @@ dùng `httpRequest` gọi thẳng API của dịch vụ đó.
   viết khác đi thì node chạy xong mà không sinh ra trường nào và không báo lỗi.
 - **`code`** — `jsCode` phải `return` mảng `[{ json: {...} }]`, đọc input bằng
   `$input.all()`. Viết ngắn gọn, tránh template literal nhiều dòng có dấu
-  tiếng Việt.
+  tiếng Việt. **Không có `fetch`/network access bên trong Code** — gọi sẽ báo
+  lỗi `fetch is not defined`. Mọi lời gọi HTTP ra ngoài phải dùng node
+  `httpRequest` riêng, không gọi trong Code.
+- **`httpRequest` — header `Authorization`/API key** — đây là chỗ hay bị kẹt
+  nhất. `parameters.authentication` chỉ nhận đúng ba giá trị:
+  `"none"`, `"predefinedCredentialType"`, `"genericCredentialType"` — KHÔNG
+  bao giờ đặt thẳng `"headerAuth"` hay tên loại credential vào đó, n8n báo lỗi
+  `The value "..." is not supported!` ngay. Hai giá trị
+  `predefinedCredentialType`/`genericCredentialType` đều đòi một credential đã
+  **lưu sẵn thật sự** trong n8n (xác nhận trong chính source node:
+  `this.getCredentials('httpHeaderAuth', ...)` ném lỗi nếu không có) — app này
+  hiện **chưa có tool tạo credential**, nên đặt `genericCredentialType` +
+  `genericAuthType: "httpHeaderAuth"` mà không tạo credential trước sẽ luôn
+  báo `Authorization failed - please check your credentials`, sửa lại kiểu gì
+  cũng vậy vì gốc là thiếu credential chứ không phải sai cú pháp.
+  Cách chạy được ngay không cần credential: đặt `authentication: "none"`, bật
+  `sendHeaders: true`, `specifyHeaders: "keypair"`, rồi điền thẳng header vào
+  `headerParameters.parameters`:
+  ```json
+  "parameters": {
+    "method": "POST",
+    "url": "https://api.example.com/v1/chat",
+    "authentication": "none",
+    "sendHeaders": true,
+    "specifyHeaders": "keypair",
+    "headerParameters": { "parameters": [
+      { "name": "Authorization", "value": "Bearer sk-xxxx" },
+      { "name": "Content-Type", "value": "application/json" }
+    ] },
+    "sendBody": true,
+    "specifyBody": "json",
+    "jsonBody": "={{ JSON.stringify({ model: \"gpt-4\", input: $json.body.text }) }}"
+  }
+  ```
+  n8n tự cảnh báo cách này không an toàn (token nằm thẳng trong workflow JSON,
+  lộ ra nếu export) — đây là đánh đổi chấp nhận được cho tới khi có tool tạo
+  credential riêng; không tự ý chuyển sang `genericCredentialType` nếu chưa có
+  credential thật đứng sau nó.
 - **`if` / `filter` / `switch`** — điều kiện dạng
   `{ "options": { "caseSensitive": true, "typeValidation": "strict", "version": 2 },
   "conditions": [{ "leftValue": "={{ $json.x }}", "rightValue": "y",

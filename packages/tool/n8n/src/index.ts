@@ -226,8 +226,40 @@ function validateWorkflowStructure(workflow: unknown): { valid: boolean; errors:
   if (typeof w.connections !== 'object' || w.connections === null || Array.isArray(w.connections)) {
     errors.push('connections must be an object')
   } else {
-    for (const source of Object.keys(w.connections as Record<string, unknown>)) {
-      if (!nodeNames.has(source)) errors.push(`connections references unknown source node "${source}"`)
+    // Real, observed recurring mistake (session log analysis): a model emits
+    // `main: [{ node, type, index }]` — a single-nested array — instead of
+    // n8n's actual double-nested `main: [[{ node, type, index }]]` (outer
+    // index = output slot, e.g. `if`'s true/false; inner array = the branches
+    // wired from that slot). n8n's own API rejects this with a generic
+    // "Expected array, received object" only after a real round trip; this
+    // catches the exact same shape locally so n8n_validate_workflow gives
+    // the correction before ever calling n8n.
+    const connections = w.connections as Record<string, unknown>
+    for (const source of Object.keys(connections)) {
+      if (!nodeNames.has(source)) { errors.push(`connections references unknown source node "${source}"`); continue }
+      const outputs = connections[source]
+      if (typeof outputs !== 'object' || outputs === null || Array.isArray(outputs)) {
+        errors.push(`connections.${source} must be an object keyed by output type, e.g. "main"`)
+        continue
+      }
+      for (const [outputType, branches] of Object.entries(outputs as Record<string, unknown>)) {
+        if (!Array.isArray(branches)) {
+          errors.push(`connections.${source}.${outputType} must be an array of arrays — one array per output slot, e.g. [[{ "node": "...", "type": "main", "index": 0 }]], not a bare object`)
+          continue
+        }
+        branches.forEach((branch, i) => {
+          if (branch === null) return // n8n allows a null gap for an unused output slot
+          if (!Array.isArray(branch)) {
+            errors.push(`connections.${source}.${outputType}[${String(i)}] must itself be an array of targets — got a single object; wrap it in an extra [ ]`)
+            return
+          }
+          branch.forEach((target, j) => {
+            if (typeof target !== 'object' || target === null) { errors.push(`connections.${source}.${outputType}[${String(i)}][${String(j)}] must be an object with node/type/index`); return }
+            const t = target as Record<string, unknown>
+            if (typeof t.node !== 'string' || !nodeNames.has(t.node)) errors.push(`connections.${source}.${outputType}[${String(i)}][${String(j)}].node must reference an existing node name`)
+          })
+        })
+      }
     }
   }
   if (w.settings !== undefined && (typeof w.settings !== 'object' || w.settings === null)) {
