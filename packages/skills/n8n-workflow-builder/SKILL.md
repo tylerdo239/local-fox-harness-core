@@ -5,9 +5,10 @@ description: Làm việc với workflow n8n — tạo mới, sửa, gỡ lỗi, 
 
 # n8n-workflow-builder
 
-App này có tám tool: `n8n_describe_node`, `n8n_list_workflows`,
+App này có chín tool: `n8n_describe_node`, `n8n_list_workflows`,
 `n8n_get_workflow`, `n8n_validate_workflow`, `n8n_upsert_workflow`,
-`n8n_activate_workflow`, `n8n_run_workflow`, `n8n_get_execution`.
+`n8n_activate_workflow`, `n8n_run_workflow`, `n8n_get_execution`,
+`n8n_list_credentials`.
 
 `n8n_describe_node(type, typeVersion?)` tra thẳng vào một kho dữ liệu trích
 xuất từ chính n8n-nodes-base thật (440+ node, mọi field/enum/điều kiện
@@ -38,10 +39,13 @@ toàn bộ kiến thức n8n có; đừng dừng lại ở nó khi `n8n_describe
    nhiều workflow trùng lặp. Nếu người dùng thật sự muốn thêm một workflow
    thứ hai, độc lập trong cùng cuộc trò chuyện thì mới truyền
    `confirmNewWorkflow: true`.
-4. `n8n_activate_workflow` cần người dùng bấm duyệt, nên nó dừng chờ; workflow
-   chưa active thì webhook trả 404.
-5. `n8n_run_workflow` chạy workflow đã active và có node `webhook`. Đọc `body`
-   trong kết quả để lấy đầu ra thật.
+4. `n8n_activate_workflow` — gọi thẳng, đừng hỏi xin phép trong chat trước.
+   Chính lời gọi này hiện hộp duyệt cho người dùng bấm, rồi dừng chờ họ; hỏi
+   thêm trong chat là bắt họ duyệt hai lần. Workflow chưa active thì webhook
+   trả 404.
+5. `n8n_run_workflow` chạy workflow đã active và có node `webhook`. `body` là
+   thứ người gọi nhận được; `execution.nodes` là từng node đã chạy ra sao —
+   `status`, `error`, số item ở mỗi output, và item đầu tiên nó sinh ra.
 6. Trả lời người dùng bằng ĐÚNG NGUYÊN VĂN `editorUrl` lấy từ kết quả
    `n8n_upsert_workflow` — không tự ghép, đoán, hay bịa bất kỳ URL nào khác
    (webhook hay dạng nào khác) để thay thế nó. Lỗi thật đã gặp: model tự
@@ -65,11 +69,15 @@ toàn bộ kiến thức n8n có; đừng dừng lại ở nó khi `n8n_describe
    "chưa lấy được link, để tôi kiểm tra lại" thay vì đưa ra bất kỳ URL nào
    không lấy trực tiếp từ tool.
 
-Khi workflow chạy xong nhưng kết quả sai hoặc rỗng: `n8n_get_workflow` rồi đối
-chiếu `parameters` của từng node với mục "Tham số hay cần" bên dưới, sửa đúng
-chỗ lệch. Kết quả rỗng gần như luôn là một khoá viết sai trong `parameters` —
-n8n bỏ qua khoá lạ và vẫn báo thành công. Đổi `responseMode` hay thêm node
-`respondToWebhook` không chữa được việc đó.
+Khi kết quả sai, rỗng hoặc chỉ là `"Error in workflow"`: đọc `execution.nodes`
+trước khi sửa gì. Node có `error` là node hỏng, và câu lỗi nói lí do. Node
+`success` mà `firstItem` thiếu trường mong đợi thì `parameters` của nó viết
+sai — đối chiếu với mục "Tham số hay cần" bên dưới. Sửa đúng node đó, rồi chạy
+lại để xem digest mới.
+
+Node cần đăng nhập vào dịch vụ khác (Gmail, Slack, API có khoá...) thì gọi
+`n8n_list_credentials` lấy `id` và `type` của credential để gắn vào node. Chưa
+có credential cần dùng thì báo người dùng tạo nó trong giao diện n8n.
 
 ## Viết node cho đúng
 
@@ -116,7 +124,8 @@ dùng tên chính xác hoặc dùng `httpRequest` gọi thẳng API của dịch
 
 - **`webhook`** — dữ liệu người gọi gửi lên nằm trong `$json.body`, không phải
   ngay trong `$json`: với payload `{"so_luong": 3}` thì viết
-  `={{ $json.body.so_luong }}`. Cùng item còn có `headers`, `query`, `params`.
+  `={{ $json.body.so_luong }}`. Webhook `GET` không có body — dữ liệu nằm trong
+  `$json.query`.
   `responseMode` chỉ nhận đúng ba giá trị — `"onReceived"` chỉ báo đã nhận,
   `"lastNode"` trả output của node cuối, `"responseNode"` trả theo một node
   `respondToWebhook`. Mặc định dùng `"lastNode"`: nó đơn giản nhất và đủ cho
@@ -127,6 +136,9 @@ dùng tên chính xác hoặc dùng `httpRequest` gọi thẳng API của dịch
   không có request HTTP nào đang chờ phản hồi cả, node đó tồn tại vô nghĩa và
   dễ khiến model sau đó tự bịa ra một "webhook URL" không có thật (lỗi thật
   đã gặp, xem mục "Quy trình" bước 6).
+- **`respondToWebhook`** — `"respondWith": "json"` kèm `"responseBody"`; thiếu
+  `respondWith` thì node trả lại nguyên item nó nhận vào. Trả JSON cố định thì
+  đơn giản hơn là dùng `"lastNode"` với một node `set` ở cuối.
 - **`set`** — `parameters.assignments.assignments` là mảng
   `{ id, name, value, type }`; khoá lồng bên trong tên đúng là `assignments`,
   viết khác đi thì node chạy xong mà không sinh ra trường nào và không báo lỗi.

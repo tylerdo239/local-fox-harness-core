@@ -116,6 +116,59 @@ interface N8nTag { readonly id: string; readonly name: string }
 interface N8nNode { readonly name: string; readonly type: string; readonly parameters?: Record<string, unknown> }
 interface N8nWorkflow { readonly id: string; readonly name: string; readonly active: boolean; readonly nodes: readonly N8nNode[] }
 
+interface N8nError { readonly message?: string; readonly description?: string | null; readonly node?: { readonly name?: string } }
+interface N8nNodeRun {
+  readonly executionStatus?: string
+  readonly error?: N8nError
+  readonly data?: { readonly main?: readonly (readonly { readonly json?: Record<string, unknown> }[] | null)[] }
+}
+interface N8nExecution {
+  readonly id: string
+  readonly status: string
+  readonly data?: { readonly resultData?: { readonly error?: N8nError; readonly runData?: Record<string, readonly N8nNodeRun[]> } }
+}
+
+const EXECUTION_WAIT_MS = 10_000
+const EXECUTION_POLL_MS = 500
+const SAMPLE_CHARS = 300
+
+function truncate(text: string, max: number): string {
+  return text.length > max ? `${text.slice(0, max)}…` : text
+}
+
+function errorText(error: N8nError): string {
+  const detail = typeof error.description === 'string' && error.description !== '' ? ` — ${truncate(error.description, 200)}` : ''
+  return `${error.message ?? 'unknown error'}${detail}`
+}
+
+// A webhook caller only ever sees "Error in workflow" or an empty body; the
+// execution record says which node failed and what each node produced. This
+// is the per-node view the model needs to fix a workflow instead of guessing.
+// `headers` is dropped from samples: a webhook item's headers fill the whole
+// sample budget before its `body` is reached.
+function digestExecution(execution: N8nExecution): JsonValue {
+  const resultData = execution.data?.resultData
+  const nodes = Object.entries(resultData?.runData ?? {}).map(([name, runs]) => {
+    const run = runs.at(-1)
+    const outputs = run?.data?.main ?? []
+    const first = outputs.find(items => (items?.length ?? 0) > 0)?.[0]?.json
+    const { headers: _headers, ...sample } = first ?? {}
+    return {
+      node: name,
+      status: run?.executionStatus ?? 'unknown',
+      itemsPerOutput: outputs.map(items => items?.length ?? 0),
+      ...(run?.error !== undefined ? { error: errorText(run.error) } : {}),
+      ...(first !== undefined ? { firstItem: truncate(JSON.stringify(sample), SAMPLE_CHARS) } : {}),
+    }
+  })
+  return asJson({
+    executionId: execution.id,
+    status: execution.status,
+    ...(resultData?.error !== undefined ? { error: errorText(resultData.error) } : {}),
+    nodes,
+  })
+}
+
 // LƯU Ý (2026-09-19, chưa sửa): fetch() dưới đây không có `signal` và không có
 // timeout. n8n không trả lời thì tool treo vô hạn và kéo theo cả lượt chat —
 // người dùng chỉ thấy màn hình đứng im, không thông báo gì. Chưa quan sát thấy
@@ -140,6 +193,25 @@ async function n8nRequest(ctx: Context, config: Config, path: string, init?: Req
     throw new Error(message)
   }
   return body
+}
+
+async function latestExecutionId(ctx: Context, config: Config, workflowId: string): Promise<number> {
+  const page = await n8nRequest(ctx, config, `/executions?workflowId=${encodeURIComponent(workflowId)}&limit=1`) as { data: readonly N8nExecution[] }
+  return Number(page.data[0]?.id ?? 0)
+}
+
+/** The execution a webhook call started, once it has stopped running — n8n may record it a moment after the webhook responds. */
+async function waitForExecution(ctx: Context, config: Config, workflowId: string, afterId: number): Promise<N8nExecution | undefined> {
+  const deadline = Date.now() + EXECUTION_WAIT_MS
+  while (Date.now() < deadline) {
+    const page = await n8nRequest(ctx, config, `/executions?workflowId=${encodeURIComponent(workflowId)}&limit=1`) as { data: readonly N8nExecution[] }
+    const latest = page.data[0]
+    if (latest !== undefined && Number(latest.id) > afterId && latest.status !== 'running' && latest.status !== 'new') {
+      return await n8nRequest(ctx, config, `/executions/${latest.id}?includeData=true`) as N8nExecution
+    }
+    await new Promise(resolve => setTimeout(resolve, EXECUTION_POLL_MS))
+  }
+  return undefined
 }
 
 async function findTagByName(ctx: Context, config: Config, tagName: string): Promise<string | undefined> {
@@ -207,6 +279,47 @@ function coerceJsonArg(value: unknown): unknown {
   }
 }
 
+const WEBHOOK_TYPE = 'n8n-nodes-base.webhook'
+const RESPOND_TYPE = 'n8n-nodes-base.respondToWebhook'
+const STICKY_NOTE_TYPE = 'n8n-nodes-base.stickyNote'
+
+function isTrigger(type: string): boolean {
+  return type === WEBHOOK_TYPE || type.endsWith('Trigger')
+}
+
+// Two mistakes n8n accepts on save and only reports at run time, if at all: a
+// node nothing leads to never runs (the run still "succeeds"), and a webhook
+// whose responseMode does not match its respondToWebhook nodes fails every
+// call with "Unused/No Respond to Webhook node".
+function checkFlow(nodes: readonly { name: string; type: string; parameters?: Record<string, unknown> }[], edges: ReadonlyMap<string, readonly string[]>): string[] {
+  const errors: string[] = []
+  const triggers = nodes.filter(node => isTrigger(node.type))
+  if (triggers.length > 0) {
+    const reached = new Set(triggers.map(node => node.name))
+    const queue = [...reached]
+    for (let name = queue.shift(); name !== undefined; name = queue.shift()) {
+      for (const next of edges.get(name) ?? []) {
+        if (!reached.has(next)) { reached.add(next); queue.push(next) }
+      }
+    }
+    const orphans = nodes.filter(node => !reached.has(node.name) && node.type !== STICKY_NOTE_TYPE).map(node => node.name)
+    if (orphans.length > 0) {
+      errors.push(`nodes not connected to any trigger, so they never run: ${orphans.join(', ')} — add them to connections`)
+    }
+  }
+  const hasRespond = nodes.some(node => node.type === RESPOND_TYPE)
+  for (const webhook of nodes.filter(node => node.type === WEBHOOK_TYPE)) {
+    const mode = webhook.parameters?.responseMode ?? 'onReceived'
+    if (hasRespond && mode !== 'responseNode') {
+      errors.push(`webhook "${webhook.name}" has responseMode ${JSON.stringify(mode)} but the workflow has a respondToWebhook node — set responseMode "responseNode", or remove the respondToWebhook node and use "lastNode"`)
+    }
+    if (!hasRespond && mode === 'responseNode') {
+      errors.push(`webhook "${webhook.name}" has responseMode "responseNode" but there is no respondToWebhook node — add one, or use "lastNode"`)
+    }
+  }
+  return errors
+}
+
 /** Local structural check before any round trip — n8n itself would reject a malformed workflow, but with a less actionable error. */
 function validateWorkflowStructure(workflow: unknown): { valid: boolean; errors: string[] } {
   const errors: string[] = []
@@ -214,6 +327,8 @@ function validateWorkflowStructure(workflow: unknown): { valid: boolean; errors:
   const w = workflow as Record<string, unknown>
   if (typeof w.name !== 'string' || w.name.trim() === '') errors.push('name must be a non-empty string')
   const nodeNames = new Set<string>()
+  const nodes: { name: string; type: string; parameters?: Record<string, unknown> }[] = []
+  const edges = new Map<string, string[]>()
   if (!Array.isArray(w.nodes)) {
     errors.push('nodes must be an array')
   } else {
@@ -225,6 +340,9 @@ function validateWorkflowStructure(workflow: unknown): { valid: boolean; errors:
       if (typeof n.type !== 'string' || n.type === '') errors.push(`nodes[${String(i)}].type must be a non-empty string`)
       if (typeof n.typeVersion !== 'number') errors.push(`nodes[${String(i)}].typeVersion must be a number`)
       if (!Array.isArray(n.position) || n.position.length !== 2) errors.push(`nodes[${String(i)}].position must be a [x, y] pair`)
+      if (typeof n.name === 'string' && typeof n.type === 'string') {
+        nodes.push({ name: n.name, type: n.type, parameters: n.parameters as Record<string, unknown> | undefined })
+      }
     }
   }
   if (typeof w.connections !== 'object' || w.connections === null || Array.isArray(w.connections)) {
@@ -260,12 +378,17 @@ function validateWorkflowStructure(workflow: unknown): { valid: boolean; errors:
           branch.forEach((target, j) => {
             if (typeof target !== 'object' || target === null) { errors.push(`connections.${source}.${outputType}[${String(i)}][${String(j)}] must be an object with node/type/index`); return }
             const t = target as Record<string, unknown>
-            if (typeof t.node !== 'string' || !nodeNames.has(t.node)) errors.push(`connections.${source}.${outputType}[${String(i)}][${String(j)}].node must reference an existing node name`)
+            if (typeof t.node !== 'string' || !nodeNames.has(t.node)) {
+              errors.push(`connections.${source}.${outputType}[${String(i)}][${String(j)}].node ${JSON.stringify(t.node)} is not a node in this workflow — must be one of: ${[...nodeNames].join(', ')}`)
+            } else {
+              edges.set(source, [...(edges.get(source) ?? []), t.node])
+            }
           })
         })
       }
     }
   }
+  errors.push(...checkFlow(nodes, edges))
   if (w.settings !== undefined && (typeof w.settings !== 'object' || w.settings === null)) {
     errors.push('settings must be an object when present')
   }
@@ -729,19 +852,11 @@ export function apply(ctx: Context, config: Config): void {
   })), 'cordis-n8n: n8n_activate_workflow')
 
   ctx.effect(() => ctx.tools.register(defineTool({
-    // LƯU Ý (2026-09-19, chưa sửa): tool này trả về đúng phản hồi của webhook,
-    // thường là {"message": "Workflow was started"} — KHÔNG có executionId. Mà
-    // composition này cũng không có tool nào liệt kê executions, nên sau khi
-    // chạy xong thì n8n_get_execution gần như không dùng được: không có cách
-    // nào biết id để đọc. Xác nhận bằng một lượt chạy thật: model kích hoạt và
-    // chạy workflow thành công, tới bước đọc kết quả thì bí và phải hỏi lại
-    // người dùng. Sửa: hoặc thêm n8n_list_executions, hoặc đọc executionId từ
-    // phản hồi khi webhook đặt responseMode: lastNode.
     name: 'n8n_run_workflow',
-    description: 'Trigger an active n8n workflow that has a Webhook trigger node. n8n\'s REST API has no generic "run" endpoint — this reads the workflow\'s own Webhook node path and POSTs to it directly.',
+    description: 'Trigger an active n8n workflow that has a Webhook trigger node, and return both the webhook response and a per-node digest of the execution it started (status, error, item counts, first output item of each node). When the result is wrong or empty, read `execution.nodes` to see which node failed or produced nothing. n8n\'s REST API has no generic "run" endpoint — this calls the workflow\'s own Webhook path.',
     parameters: {
       workflowId: { type: 'string', required: true },
-      payload: { type: 'json', description: 'JSON body to send to the workflow\'s webhook' },
+      payload: { type: 'json', description: 'Data to send: the JSON body for POST/PUT/PATCH webhooks, query parameters for GET webhooks' },
     },
     output: { schema: { type: 'json' }, render: renderJson },
     async execute(args) {
@@ -761,23 +876,49 @@ export function apply(ctx: Context, config: Config): void {
       // n8n a JSON string literal, so the webhook node's `body` is a string
       // and every `$json.body.<field>` expression downstream reads undefined.
       const payload = coerceJsonArg(args.payload)
-      const response = await fetch(`${config.baseURL}/webhook/${path}`, {
+      // fetch() refuses a body on GET/HEAD, so there the payload becomes the
+      // query string, which is where n8n's webhook node reads it ($json.query).
+      const bodyless = method === 'GET' || method === 'HEAD'
+      const url = new URL(`${config.baseURL}/webhook/${path}`)
+      if (bodyless && typeof payload === 'object' && payload !== null) {
+        for (const [key, value] of Object.entries(payload)) url.searchParams.set(key, typeof value === 'string' ? value : JSON.stringify(value))
+      }
+      const before = await latestExecutionId(ctx, config, args.workflowId)
+      const response = await fetch(url, {
         method,
         headers: { 'content-type': 'application/json' },
-        body: payload === undefined ? undefined : JSON.stringify(payload),
+        body: bodyless || payload === undefined ? undefined : JSON.stringify(payload),
       })
       const responseBody: unknown = await response.json().catch(async () => response.text())
-      return asJson({ status: response.status, body: responseBody })
+      const execution = await waitForExecution(ctx, config, args.workflowId, before)
+      return asJson({
+        status: response.status,
+        body: responseBody,
+        execution: execution === undefined ? 'no execution record found within 10s' : digestExecution(execution),
+      })
     },
   })), 'cordis-n8n: n8n_run_workflow')
 
   ctx.effect(() => ctx.tools.register(defineTool({
     name: 'n8n_get_execution',
-    description: 'Get the status and result of one n8n workflow execution.',
-    parameters: { executionId: { type: 'string', required: true } },
+    description: 'Get the per-node digest of one n8n execution by its numeric id (the `executionId` n8n_run_workflow returns). n8n_run_workflow already includes the digest of the run it starts; use this for an earlier execution.',
+    parameters: { executionId: { type: 'json', required: true, description: 'Numeric execution id, e.g. "101"' } },
     output: { schema: { type: 'json' }, render: renderJson },
     async execute(args) {
-      return asJson(await n8nRequest(ctx, config, `/executions/${encodeURIComponent(args.executionId)}`))
+      const executionId = String(args.executionId)
+      const execution = await n8nRequest(ctx, config, `/executions/${encodeURIComponent(executionId)}?includeData=true`) as N8nExecution
+      return digestExecution(execution)
     },
   })), 'cordis-n8n: n8n_get_execution')
+
+  ctx.effect(() => ctx.tools.register(defineTool({
+    name: 'n8n_list_credentials',
+    description: 'List the credentials saved in n8n (id, name, type — never the secret itself). A node that calls an authenticated service references one as `"credentials": { "<type>": { "id": "<id>", "name": "<name>" } }`. If the needed one is missing, the user has to create it in the n8n editor.',
+    parameters: {},
+    output: { schema: { type: 'json' }, render: renderJson },
+    async execute() {
+      const page = await n8nRequest(ctx, config, '/credentials') as { data: readonly { id: string; name: string; type: string }[] }
+      return asJson(page.data.map(({ id, name, type }) => ({ id, name, type })))
+    },
+  })), 'cordis-n8n: n8n_list_credentials')
 }
