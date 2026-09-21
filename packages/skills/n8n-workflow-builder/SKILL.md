@@ -79,6 +79,20 @@ Node cần đăng nhập vào dịch vụ khác (Gmail, Slack, API có khoá...)
 `n8n_list_credentials` lấy `id` và `type` của credential để gắn vào node. Chưa
 có credential cần dùng thì báo người dùng tạo nó trong giao diện n8n.
 
+## Nói với người dùng bằng tên, không bằng id
+
+Người dùng không đọc được id kiểu `jdo7wmTQ6jnmBILo`. Id chỉ dùng trong lời gọi
+tool; khi viết cho người dùng thì gọi mọi thứ bằng tên có sẵn trong kết quả tool:
+
+- Workflow — `name`: "workflow **ty-gia**".
+- Node — `name` của node: "node **HTTP Request** trả về 404".
+- Credential — `name`: "credential **Gmail công ty**".
+- Lần chạy không có tên — tả bằng workflow, thời điểm và kết quả: "lần chạy
+  ty-gia lúc 10:28 lỗi ở node HTTP Request".
+- Link — tên làm chữ hiển thị: `[Mở workflow ty-gia](<editorUrl>)`.
+
+Chỉ đưa id ra khi người dùng hỏi thẳng.
+
 ## Viết node cho đúng
 
 `type` là tên kỹ thuật có tiền tố `n8n-nodes-base.`, **không phải tên hiển thị
