@@ -22,7 +22,7 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 // referenced by name below, only through the ctx.<key> they add.
 import type {} from '@deepseek-ai/dsh-agent-default-model'
 import type {} from '@deepseek-ai/dsh-client-connection'
-import type {} from '@deepseek-ai/dsh-session-query'
+import type { SessionRecord } from '@deepseek-ai/dsh-session-query'
 import { createUserMessage, ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import { credentialRef, isCredentialRefName } from '@deepseek-ai/dsh-credentials'
 import { SessionId, SessionLogOffset, type Session, type SessionEvent } from '@deepseek-ai/dsh-session'
@@ -142,14 +142,67 @@ function hasOpenTurn(events: readonly SessionEvent[]): boolean {
  * frontend's `hasRealUserMessage` (conversation.tsx) already uses, so
  * server and client can never disagree on what counts as "chatted".
  */
+function isRealUserMessage(event: SessionEvent | undefined): boolean {
+  if (event?.type !== 'user/message') return false
+  const source = event.data.source as { kind?: string } | undefined
+  return source?.kind === undefined || source.kind === 'user'
+}
+
 function sessionHasRealUserMessage(session: Session): boolean {
   for (const seq of session.surface.nodes) {
-    const event = session.eventAt(seq)
-    if (event?.type !== 'user/message') continue
-    const source = event.data.source as { kind?: string } | undefined
-    if (source?.kind === undefined || source.kind === 'user') return true
+    if (isRealUserMessage(session.eventAt(seq))) return true
   }
   return false
+}
+
+interface SessionSummary {
+  sessionId: string
+  cwd?: string
+  seq: number
+  createdAt: number
+  title: string | null
+}
+
+// ctx.sessions only holds sessions loaded in memory: a restart empties it, and
+// dsh's idle sweep evicts quiet ones. The sidebar must list what is on disk
+// too, so persisted sessions are read through ctx.sessionQuery. A session that
+// is not live cannot change, so its summary is read once and cached; going
+// live again drops the cache entry so a later eviction re-reads it.
+const persistedSummaries = new Map<string, SessionSummary | null>()
+
+async function summarizeSession(ctx: Context, record: SessionRecord): Promise<SessionSummary | null> {
+  const id = record.header.id
+  const live = ctx.sessions.get(id)
+  if (live !== undefined) {
+    persistedSummaries.delete(id)
+    if (!sessionHasRealUserMessage(live)) return null
+    return {
+      sessionId: live.id,
+      cwd: live.header.cwd,
+      seq: live.seq,
+      createdAt: live.header.createdAt,
+      title: ctx.sessionTitle.get(live)?.title ?? null,
+    }
+  }
+  const cached = persistedSummaries.get(id)
+  if (cached !== undefined) return cached
+  let summary: SessionSummary | null = null
+  try {
+    const snapshot = await ctx.sessionQuery.readSession(id)
+    if (snapshot.events.some(isRealUserMessage)) {
+      summary = {
+        sessionId: id,
+        cwd: record.header.cwd,
+        seq: snapshot.events.at(-1)?.seq ?? 0,
+        createdAt: record.header.createdAt,
+        title: (await ctx.sessionQuery.readTitle(id))?.title ?? null,
+      }
+    }
+  } catch {
+    // An unreadable log must not take the whole list down with it.
+  }
+  persistedSummaries.set(id, summary)
+  return summary
 }
 
 function workspaceRoot(): string {
@@ -230,35 +283,25 @@ export function apply(ctx: Context): void {
       return json({ sessionId: agent.session.id, cwd })
     },
     GET: async () => {
-      const sessions = ctx.sessions.list()
-        .filter(sessionHasRealUserMessage)
-        .map(session => ({
-          sessionId: session.id,
-          cwd: session.header.cwd,
-          seq: session.seq,
-          createdAt: session.header.createdAt,
-          // ctx.sessionTitle.get() folds the log-only `session/title` event
-          // in memory — no extra I/O, session-title-llm/fallback already
-          // append it automatically (see this file's own import comment).
-          title: ctx.sessionTitle.get(session)?.title ?? null,
-        }))
-      return json({ sessions })
+      const records = await ctx.sessionQuery.listSessions()
+      const summaries = await Promise.all(records.map(record => summarizeSession(ctx, record)))
+      return json({ sessions: summaries.filter(summary => summary !== null) })
     },
   })
 
   // Rename: real API (`ctx.sessionTitle.rename`), not invented storage —
   // appends a `source: 'user'` `session/title` event that PINS the title
-  // (automatic generation stops for this session afterward). Only live
-  // sessions can be looked up via ctx.sessions.get() — same "live only"
-  // limitation the rest of this route already lives with (Phase 2/D).
+  // (automatic generation stops for this session afterward). rename() needs a
+  // live Session, so an evicted one is resumed first, as sending a message does.
   registerRoute(ctx, '/session-rename', {
     POST: async (request) => {
       const body = await readJson(request)
       const sessionId = requireString(body, 'sessionId')
       const title = requireString(body, 'title')
       if (sessionId === undefined || title === undefined) return badRequest('sessionId and title are required')
+      await resolveAgent(ctx, SessionId(sessionId))
       const session = ctx.sessions.get(SessionId(sessionId))
-      if (session === undefined) return notFoundResponse(`session ${sessionId} is not live`)
+      if (session === undefined) return notFoundResponse(`session ${sessionId} not found`)
       try {
         const snapshot = ctx.sessionTitle.rename(session, title)
         return json({ title: snapshot.title })
