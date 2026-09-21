@@ -43,13 +43,24 @@ import type {} from '@deepseek-ai/dsh-webhook'
 import type {} from '@deepseek-ai/dsh-user-approval'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import type {} from '@deepseek-ai/dsh-client-connection'
+import '@deepseek-ai/dsh-system-prompt'
 
 export const name = 'cordis-n8n'
 // 'connection' backs the read-only /api/v1/automations* routes the FE
 // dashboard polls — separate from the agent-facing n8n_* tools above, same
 // static-path GET/POST convention as gateway.ts (see that file's own header
 // comment for why: ctx.connection.fetch.register() keys by exact pathname).
-export const inject = ['tools', 'credentials', 'webServer', 'webhookRuntime', 'approval', 'connection']
+export const inject = ['tools', 'credentials', 'webServer', 'webhookRuntime', 'approval', 'connection', 'systemPrompt']
+
+// In the system prompt rather than the n8n skill: measured, a question like
+// "any recent errors in workflow X?" often skips loading the skill, and then
+// the answer is full of ids (3 runs: skill loaded -> 0 ids; not loaded -> 8, 10).
+const NAMES_NOT_IDS = [
+  'When you tell the user about n8n, refer to workflows, nodes and credentials by their name, never by id: write "workflow ty-gia", not its id, and use the name as link text — [Open workflow ty-gia](<editorUrl>).',
+  'An execution has no name, and its number is an id too: describe it by time and result, e.g. "the run at 10:28 on 20/09 failed in node HTTP Request".',
+  'Ids are for tool calls; put one in a reply only when the user asks for it.',
+].join(' ')
+const NAMES_NOT_IDS_ORDER = 2850
 
 interface RouteConfig {
   readonly workspacePath: string
@@ -169,19 +180,19 @@ function digestExecution(execution: N8nExecution): JsonValue {
   })
 }
 
-// LƯU Ý (2026-09-19, chưa sửa): fetch() dưới đây không có `signal` và không có
-// timeout. n8n không trả lời thì tool treo vô hạn và kéo theo cả lượt chat —
-// người dùng chỉ thấy màn hình đứng im, không thông báo gì. Chưa quan sát thấy
-// xảy ra thật (lần nghi treo hoá ra là cổng duyệt của n8n_activate_workflow
-// đang chờ người bấm, xem ghi chú ở tool đó), nên đây là rủi ro tiềm ẩn chứ
-// không phải lỗi đã tái hiện được. Sửa: truyền AbortSignal.timeout(...) vào,
-// lấy hạn từ config.
+// Without a deadline a hung n8n (or a workflow that never finishes) holds the
+// whole chat turn open with no message: observed for real, a looping workflow
+// kept a turn waiting until the client gave up at 240 s.
+const API_TIMEOUT_MS = 30_000
+const WEBHOOK_TIMEOUT_MS = 60_000
+
 async function n8nRequest(ctx: Context, config: Config, path: string, init?: RequestInit): Promise<unknown> {
   const credential = await ctx.credentials.resolve(credentialRef(config.apiKeyEnv))
   if (credential === undefined || credential.value === '') {
     throw new Error(`n8n: credential ${config.apiKeyEnv} is not configured — set it via POST /api/v1/credentials first`)
   }
   const response = await fetch(`${config.baseURL}/api/v1${path}`, {
+    signal: AbortSignal.timeout(API_TIMEOUT_MS),
     ...init,
     headers: { 'content-type': 'application/json', 'x-n8n-api-key': credential.value, ...init?.headers },
   })
@@ -319,12 +330,18 @@ function checkFlow(nodes: readonly { name: string; type: string; parameters?: Re
       errors.push(`nodes not connected to any trigger, so they never run: ${orphans.join(', ')} — add them to connections`)
     }
   }
-  // respondWith defaults to firstIncomingItem, which echoes the request back
-  // and silently ignores responseBody.
+  // Left unset, respondWith defaults to firstIncomingItem, which echoes the
+  // request back and silently ignores responseBody. An explicit choice such as
+  // allIncomingItems is deliberate and left alone.
   for (const respond of nodes.filter(node => node.type === RESPOND_TYPE)) {
-    const respondWith = respond.parameters?.respondWith
-    if (respond.parameters?.responseBody !== undefined && respondWith !== 'json' && respondWith !== 'text') {
-      errors.push(`respondToWebhook "${respond.name}" has a responseBody but respondWith is ${JSON.stringify(respondWith ?? 'firstIncomingItem')}, so the body is ignored — set "respondWith": "json" (or "text")`)
+    if (respond.parameters?.responseBody !== undefined && respond.parameters?.respondWith === undefined) {
+      errors.push(`respondToWebhook "${respond.name}" has a responseBody but no respondWith, so it defaults to firstIncomingItem and the body is ignored — set "respondWith": "json" (or "text")`)
+    }
+  }
+  const triggerNames = new Set(triggers.map(node => node.name))
+  for (const [source, targets] of edges) {
+    for (const target of targets) {
+      if (triggerNames.has(target)) errors.push(`connections["${source}"] leads into trigger "${target}" — a trigger only starts the flow and cannot be a target; this makes the workflow loop forever`)
     }
   }
   const hasRespond = nodes.some(node => node.type === RESPOND_TYPE)
@@ -619,6 +636,7 @@ function registerAutomationsRoute(ctx: Context, path: string, handlers: Partial<
 }
 
 export function apply(ctx: Context, config: Config): void {
+  ctx.systemPrompt.section({ name: 'cordis-n8n:names-not-ids', order: NAMES_NOT_IDS_ORDER, text: NAMES_NOT_IDS })
   // Read-only dashboard data for apps/web's /automations page — separate
   // from the agent-facing n8n_* tools above (an LLM tool call and a browser
   // fetch are different trust boundaries: this route only ever reads).
@@ -909,11 +927,21 @@ export function apply(ctx: Context, config: Config): void {
         for (const [key, value] of Object.entries(payload)) url.searchParams.set(key, typeof value === 'string' ? value : JSON.stringify(value))
       }
       const before = await latestExecutionId(ctx, config, args.workflowId)
-      const response = await fetch(url, {
-        method,
-        headers: { 'content-type': 'application/json' },
-        body: bodyless || payload === undefined ? undefined : JSON.stringify(payload),
-      })
+      let response: Response
+      try {
+        response = await fetch(url, {
+          method,
+          headers: { 'content-type': 'application/json' },
+          body: bodyless || payload === undefined ? undefined : JSON.stringify(payload),
+          signal: AbortSignal.timeout(WEBHOOK_TIMEOUT_MS),
+        })
+      } catch (error) {
+        if (!(error instanceof Error && error.name === 'TimeoutError')) throw error
+        return asJson({
+          status: 'timeout',
+          error: `the webhook did not respond within ${String(WEBHOOK_TIMEOUT_MS / 1000)}s — the workflow is still running. A connection that leads back to an earlier node (a loop) or a Wait node are the usual causes; check with n8n_list_executions and n8n_get_workflow.`,
+        })
+      }
       const text = await response.text()
       let responseBody: unknown = text
       try { responseBody = JSON.parse(text) } catch { /* not JSON — keep the text */ }
@@ -937,6 +965,26 @@ export function apply(ctx: Context, config: Config): void {
       return digestExecution(execution)
     },
   })), 'cordis-n8n: n8n_get_execution')
+
+  ctx.effect(() => ctx.tools.register(defineTool({
+    name: 'n8n_list_executions',
+    description: 'List the most recent executions of one workflow, newest first: executionId, status (success, error, running, waiting...), start and stop time. Use n8n_get_execution on an id to see which node failed.',
+    parameters: {
+      workflowId: { type: 'string', required: true },
+      limit: { type: 'number', description: 'How many to return, default 10, max 50' },
+    },
+    output: { schema: { type: 'json' }, render: renderJson },
+    async execute(args) {
+      const limit = Math.min(Math.max(Math.trunc(args.limit ?? 10), 1), 50)
+      const page = await n8nRequest(ctx, config, `/executions?workflowId=${encodeURIComponent(args.workflowId)}&limit=${String(limit)}`) as { data: readonly (N8nExecution & { startedAt?: string; stoppedAt?: string | null })[] }
+      return asJson(page.data.map(execution => ({
+        executionId: execution.id,
+        status: execution.status,
+        startedAt: execution.startedAt ?? null,
+        stoppedAt: execution.stoppedAt ?? null,
+      })))
+    },
+  })), 'cordis-n8n: n8n_list_executions')
 
   ctx.effect(() => ctx.tools.register(defineTool({
     name: 'n8n_list_credentials',

@@ -5,10 +5,10 @@ description: Làm việc với workflow n8n — tạo mới, sửa, gỡ lỗi, 
 
 # n8n-workflow-builder
 
-App này có chín tool: `n8n_describe_node`, `n8n_list_workflows`,
+App này có mười tool: `n8n_describe_node`, `n8n_list_workflows`,
 `n8n_get_workflow`, `n8n_validate_workflow`, `n8n_upsert_workflow`,
-`n8n_activate_workflow`, `n8n_run_workflow`, `n8n_get_execution`,
-`n8n_list_credentials`.
+`n8n_activate_workflow`, `n8n_run_workflow`, `n8n_list_executions`,
+`n8n_get_execution`, `n8n_list_credentials`.
 
 `n8n_describe_node(type, typeVersion?)` tra thẳng vào một kho dữ liệu trích
 xuất từ chính n8n-nodes-base thật (440+ node, mọi field/enum/điều kiện
@@ -46,8 +46,10 @@ toàn bộ kiến thức n8n có; đừng dừng lại ở nó khi `n8n_describe
 5. `n8n_run_workflow` chạy workflow đã active và có node `webhook`. `body` là
    thứ người gọi nhận được; `execution.nodes` là từng node đã chạy ra sao —
    `status`, `error`, số item ở mỗi output, và item đầu tiên nó sinh ra.
-6. Trả lời người dùng bằng ĐÚNG NGUYÊN VĂN `editorUrl` lấy từ kết quả
-   `n8n_upsert_workflow` — không tự ghép, đoán, hay bịa bất kỳ URL nào khác
+6. Trả lời người dùng kèm link mở workflow: đích của link là ĐÚNG NGUYÊN VĂN
+   `editorUrl` lấy từ kết quả `n8n_upsert_workflow`, chữ hiển thị là tên
+   workflow — `[Mở workflow ty-gia](<editorUrl>)`, không dán URL thô. Không
+   tự ghép, đoán, hay bịa bất kỳ URL nào khác
    (webhook hay dạng nào khác) để thay thế nó. Lỗi thật đã gặp: model tự
    "tính" ra một "Webhook URL" bằng cách ghép `http://127.0.0.1:5678/webhook/`
    với `path` của node `respondToWebhook`, dù workflow đó trigger bằng
@@ -78,20 +80,6 @@ lại để xem digest mới.
 Node cần đăng nhập vào dịch vụ khác (Gmail, Slack, API có khoá...) thì gọi
 `n8n_list_credentials` lấy `id` và `type` của credential để gắn vào node. Chưa
 có credential cần dùng thì báo người dùng tạo nó trong giao diện n8n.
-
-## Nói với người dùng bằng tên, không bằng id
-
-Người dùng không đọc được id kiểu `jdo7wmTQ6jnmBILo`. Id chỉ dùng trong lời gọi
-tool; khi viết cho người dùng thì gọi mọi thứ bằng tên có sẵn trong kết quả tool:
-
-- Workflow — `name`: "workflow **ty-gia**".
-- Node — `name` của node: "node **HTTP Request** trả về 404".
-- Credential — `name`: "credential **Gmail công ty**".
-- Lần chạy không có tên — tả bằng workflow, thời điểm và kết quả: "lần chạy
-  ty-gia lúc 10:28 lỗi ở node HTTP Request".
-- Link — tên làm chữ hiển thị: `[Mở workflow ty-gia](<editorUrl>)`.
-
-Chỉ đưa id ra khi người dùng hỏi thẳng.
 
 ## Viết node cho đúng
 
