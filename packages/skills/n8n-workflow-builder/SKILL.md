@@ -5,10 +5,19 @@ description: Làm việc với workflow n8n — tạo mới, sửa, gỡ lỗi, 
 
 # n8n-workflow-builder
 
-App này có bảy tool: `n8n_list_workflows`, `n8n_get_workflow`,
-`n8n_validate_workflow`, `n8n_upsert_workflow`, `n8n_activate_workflow`,
-`n8n_run_workflow`, `n8n_get_execution`. Không có tool nào tra cứu danh mục
-node — tên node phải viết đúng ngay từ đầu, xem mục dưới.
+App này có tám tool: `n8n_describe_node`, `n8n_list_workflows`,
+`n8n_get_workflow`, `n8n_validate_workflow`, `n8n_upsert_workflow`,
+`n8n_activate_workflow`, `n8n_run_workflow`, `n8n_get_execution`.
+
+`n8n_describe_node(type, typeVersion?)` tra thẳng vào một kho dữ liệu trích
+xuất từ chính n8n-nodes-base thật (440+ node, mọi field/enum/điều kiện
+`displayOptions`, kèm `builderHint` — gợi ý cấu hình do chính n8n viết sẵn
+cho từng node khi có) — không phải đoán hay nhớ. Dùng nó bất cứ khi nào cần
+1 node KHÔNG nằm trong danh sách quen thuộc bên dưới, hoặc khi n8n báo lỗi
+validate mà mục "Tham số hay cần" chưa giải thích được. Danh sách dưới đây
+chỉ là các node hay gặp nhất và những lỗi cụ thể đã từng thấy — không phải
+toàn bộ kiến thức n8n có; đừng dừng lại ở nó khi `n8n_describe_node` trả lời
+được câu hỏi trực tiếp hơn.
 
 ## Quy trình
 
@@ -17,14 +26,44 @@ node — tên node phải viết đúng ngay từ đầu, xem mục dưới.
    một việc.
 2. `n8n_validate_workflow` trước mỗi lần upsert. Không tốn gì, bắt lỗi cấu
    trúc ngay.
-3. `n8n_upsert_workflow` — **lưu lại `id` trả về** và dùng nó cho mọi thay đổi
-   sau đó. Gọi lại mà không truyền `workflowId` sẽ tạo ra workflow thứ hai.
+3. `n8n_upsert_workflow` — **lưu lại `id` trả về và LUÔN truyền lại nó ở mọi
+   lần sửa tiếp theo trong cùng cuộc trò chuyện, kể cả khi đổi cấu trúc lớn**
+   (thêm trigger khác, đổi tên node, viết lại gần như toàn bộ nodes/
+   connections). Đổi cấu trúc lớn vẫn là SỬA cùng một workflow, không phải
+   tạo workflow mới — đừng viết lại `workflow` từ đầu với một cái `name`
+   mới chỉ vì cách tiếp cận thay đổi. Gọi lại mà không truyền `workflowId`
+   khi cuộc trò chuyện đã từng tạo/sửa một workflow sẽ bị TỪ CHỐI (lỗi liệt
+   kê rõ id/tên đã có) — đây là chặn thật, không phải gợi ý, vì việc quên
+   truyền `workflowId` mỗi khi đổi cấu trúc là nguyên nhân thật đã gây ra
+   nhiều workflow trùng lặp. Nếu người dùng thật sự muốn thêm một workflow
+   thứ hai, độc lập trong cùng cuộc trò chuyện thì mới truyền
+   `confirmNewWorkflow: true`.
 4. `n8n_activate_workflow` cần người dùng bấm duyệt, nên nó dừng chờ; workflow
    chưa active thì webhook trả 404.
 5. `n8n_run_workflow` chạy workflow đã active và có node `webhook`. Đọc `body`
    trong kết quả để lấy đầu ra thật.
-6. Trả về cho người dùng kèm link markdown mở workflow, lấy `editorUrl` trong
-   kết quả upsert.
+6. Trả lời người dùng bằng ĐÚNG NGUYÊN VĂN `editorUrl` lấy từ kết quả
+   `n8n_upsert_workflow` — không tự ghép, đoán, hay bịa bất kỳ URL nào khác
+   (webhook hay dạng nào khác) để thay thế nó. Lỗi thật đã gặp: model tự
+   "tính" ra một "Webhook URL" bằng cách ghép `http://127.0.0.1:5678/webhook/`
+   với `path` của node `respondToWebhook`, dù workflow đó trigger bằng
+   `gmailTrigger` (polling) chứ không có node `webhook` nào cả — link đưa ra
+   sai hoàn toàn, không ai gọi được. Chỉ nhắc tới URL webhook khi workflow
+   THẬT SỰ có node trigger kiểu `webhook` (kiểm tra bằng `n8n_get_workflow`
+   nếu không chắc) và dùng đúng `path` đọc được từ chính node đó — không
+   đoán, không suy luận từ node khác.
+   **Được hỏi lại về link ở một câu hỏi RIÊNG, không ngay sau khi tạo/sửa**
+   (kết quả `n8n_upsert_workflow` cũ có thể đã trôi khỏi ngữ cảnh) — gọi
+   `n8n_get_workflow(workflowId)` hoặc `n8n_list_workflows()` rồi lấy
+   `editorUrl` từ đó, cả hai đều trả kèm trường này. Lỗi thật đã gặp khi
+   không làm vậy: model không nhớ `editorUrl` cũ, tự hỏi ngược lại người
+   dùng "bạn dùng n8n version nào", đưa ra placeholder kiểu
+   `https://<n8n-instance-url>/workflow/<id>`, rồi cuối cùng BỊA HẲN một
+   domain không có thật (`https://n8n.fpt.com.vn/workflow/<id>`) và khẳng
+   định chắc nịch link đó dùng được. Tuyệt đối không làm vậy — nếu vì lý do
+   gì đó không gọi được `n8n_get_workflow`/`n8n_list_workflows`, nói rõ
+   "chưa lấy được link, để tôi kiểm tra lại" thay vì đưa ra bất kỳ URL nào
+   không lấy trực tiếp từ tool.
 
 Khi workflow chạy xong nhưng kết quả sai hoặc rỗng: `n8n_get_workflow` rồi đối
 chiếu `parameters` của từng node với mục "Tham số hay cần" bên dưới, sửa đúng
@@ -42,8 +81,10 @@ gọi là "Edit Fields") · `code` 2 · `httpRequest` 4.2 · `if` 2.2 · `switch
 · `filter` 2.2 · `merge` 3.1 · `splitInBatches` 3 (giao diện gọi là "Loop Over
 Items") · `respondToWebhook` 1.4 · `wait` 1.1 · `noOp` 1 · `executeWorkflow` 1.2
 
-Node nào không nằm trong danh sách này thì hỏi người dùng tên chính xác hoặc
-dùng `httpRequest` gọi thẳng API của dịch vụ đó.
+Node nào không nằm trong danh sách này thì gọi `n8n_describe_node("tên-node")`
+để lấy đúng tên kỹ thuật, `typeVersion`, và tham số — đừng đoán, đừng hỏi
+người dùng trước khi tra. Không tìm thấy trong catalog thì mới hỏi người
+dùng tên chính xác hoặc dùng `httpRequest` gọi thẳng API của dịch vụ đó.
 
 ## Cấu trúc workflow
 
@@ -79,8 +120,13 @@ dùng `httpRequest` gọi thẳng API của dịch vụ đó.
   `responseMode` chỉ nhận đúng ba giá trị — `"onReceived"` chỉ báo đã nhận,
   `"lastNode"` trả output của node cuối, `"responseNode"` trả theo một node
   `respondToWebhook`. Mặc định dùng `"lastNode"`: nó đơn giản nhất và đủ cho
-  hầu hết việc. Chỉ thêm node `respondToWebhook` khi đã đặt
-  `"responseMode": "responseNode"`, và ngược lại.
+  hầu hết việc. Chỉ thêm node `respondToWebhook` khi workflow có node trigger
+  **kiểu `webhook` thật sự** và đã đặt `"responseMode": "responseNode"` trên
+  chính node đó — không thêm `respondToWebhook` vào workflow trigger bằng
+  `gmailTrigger`/`scheduleTrigger`/`manualTrigger`/bất kỳ trigger nào khác:
+  không có request HTTP nào đang chờ phản hồi cả, node đó tồn tại vô nghĩa và
+  dễ khiến model sau đó tự bịa ra một "webhook URL" không có thật (lỗi thật
+  đã gặp, xem mục "Quy trình" bước 6).
 - **`set`** — `parameters.assignments.assignments` là mảng
   `{ id, name, value, type }`; khoá lồng bên trong tên đúng là `assignments`,
   viết khác đi thì node chạy xong mà không sinh ra trường nào và không báo lỗi.

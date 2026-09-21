@@ -33,6 +33,23 @@ services:
       N8N_VERSION_NOTIFICATIONS_WHATS_NEW_ENABLED: "false"  # separate flag from the line above — confirmed both needed
       N8N_HIRING_BANNER_ENABLED: "false"
       N8N_TEMPLATES_ENABLED: "false"
+      # Real bug found and fixed (user: OAuth2 "Error: Unauthorized" connecting
+      # a Google node, at http://localhost:5678/rest/oauth2-credential/callback).
+      # Root cause confirmed by reading n8n's own source (@n8n/config's
+      # GlobalConfig, services/url.service.js): with N8N_EDITOR_BASE_URL and
+      # WEBHOOK_URL both unset, n8n's OAuth redirect_uri is computed ONCE at
+      # boot from N8N_HOST, which defaults to the hardcoded string
+      # `'localhost'` — NOT from the Host header of whichever origin the
+      # browser actually used. This app's editorBaseURL (cordis.patch.yml)
+      # and this very port mapping both standardize on 127.0.0.1, so a user
+      # logged into n8n at http://127.0.0.1:5678 (a real auth cookie for that
+      # origin) gets redirected back by Google to http://localhost:5678/...
+      # — a DIFFERENT origin n8n's own cookie isn't sent to — landing
+      # without a session. n8n's oauth.service.js then throws exactly
+      # `AuthError('Unauthorized')` when decodeCsrfState finds no req.user.
+      # Setting this explicitly makes n8n's own computed base URL agree with
+      # where the user actually logs in, everywhere in this app.
+      N8N_EDITOR_BASE_URL: "http://127.0.0.1:5678"
     restart: unless-stopped
 
   core:

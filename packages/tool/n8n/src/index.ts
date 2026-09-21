@@ -26,7 +26,11 @@
 //   n8n's own `/rest/api-keys/scopes` endpoint after the human-facing names
 //   (`workflow:publish`) were rejected with "Invalid scopes for user role".
 import { randomUUID, timingSafeEqual } from 'node:crypto'
+import { readFileSync } from 'node:fs'
 import type { IncomingMessage, ServerResponse } from 'node:http'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { gunzipSync } from 'node:zlib'
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { defineTool } from '@deepseek-ai/dsh-tools'
@@ -268,6 +272,72 @@ function validateWorkflowStructure(workflow: unknown): { valid: boolean; errors:
   return { valid: errors.length === 0, errors }
 }
 
+// Real "kho kiến thức" node schema catalog (user: "cứ có 1 flow node n8n làm
+// sai rồi cứ thêm skill md ... Agent phải hiểu và có 1 kho kiến thức về node
+// trong n8n chứ") — ground truth for all 440+ n8n-nodes-base node types,
+// extracted straight from a real running n8n's own installed node package
+// (see scripts/extract-node-catalog.cjs's own header for why: n8n's live
+// schema endpoint, `/types/nodes.json`, needs a real browser login cookie,
+// confirmed unusable with just an API key). Regenerate with
+// scripts/regenerate-catalog.sh when the target n8n version changes; this
+// is a point-in-time snapshot, not something refreshed at runtime.
+interface N8nCatalogVersionGroup {
+  readonly versions: readonly number[]
+  readonly displayName: string
+  readonly name: string
+  readonly group?: readonly string[]
+  readonly description?: string
+  readonly builderHint?: unknown
+  readonly properties: readonly unknown[]
+}
+interface N8nCatalogEntry {
+  readonly type: string
+  readonly displayName: string
+  readonly group?: readonly string[]
+  readonly description?: string
+  readonly defaultVersion: number
+  readonly builderHint?: unknown
+  readonly versionGroups: readonly N8nCatalogVersionGroup[]
+}
+
+let cachedNodeCatalog: ReadonlyMap<string, N8nCatalogEntry> | undefined
+
+function loadNodeCatalog(): ReadonlyMap<string, N8nCatalogEntry> {
+  if (cachedNodeCatalog !== undefined) return cachedNodeCatalog
+  const here = dirname(fileURLToPath(import.meta.url))
+  const gzPath = join(here, '..', 'node-catalog.json.gz')
+  const entries = JSON.parse(gunzipSync(readFileSync(gzPath)).toString('utf8')) as N8nCatalogEntry[]
+  cachedNodeCatalog = new Map(entries.map((e) => [e.type, e]))
+  return cachedNodeCatalog
+}
+
+/** Accepts either the short display name ("httpRequest") or the full technical type ("n8n-nodes-base.httpRequest") — the exact ambiguity SKILL.md already warns models about. */
+function resolveCatalogType(input: string): string {
+  return input.startsWith('n8n-nodes-base.') ? input : `n8n-nodes-base.${input}`
+}
+
+// Real bug found and fixed (user: "khi đang chat mà sửa gì Agent tự tạo ra 1
+// flow mới bên n8n mà ko trực tiếp sửa trên flow cũ"): confirmed via a real
+// session log — the model built a workflow, then on a follow-up edit that
+// changed the trigger/structure it regenerated the WHOLE workflow object
+// from scratch, including a fresh `name`, and called n8n_upsert_workflow
+// with no `workflowId`. The name-based dedup below only catches an EXACT
+// name repeat; it never fires here because the model also invents a new
+// name each time ("Gmail Reader with AI Analysis" -> "Gmail Analysis with
+// OpenAI" -> "Gmail Analysis - Professional", three separate real n8n
+// workflow ids from one conversation). This is a same-process, same-session
+// memory of every workflow this exact tool has touched — NOT the n8n `tags`
+// API the code below already documents as unreliable on this instance —
+// so a second create with no workflowId in a session that already has one
+// gets refused with an actionable error instead of silently duplicating.
+const sessionWorkflowMemory = new Map<string, Map<string, string>>()
+
+function rememberSessionWorkflow(sessionId: string, id: string, name: string): void {
+  const forSession = sessionWorkflowMemory.get(sessionId) ?? new Map<string, string>()
+  forSession.set(id, name)
+  sessionWorkflowMemory.set(sessionId, forSession)
+}
+
 function safeCompare(a: string, b: string): boolean {
   const bufA = Buffer.from(a)
   const bufB = Buffer.from(b)
@@ -452,7 +522,7 @@ export function apply(ctx: Context, config: Config): void {
 
   ctx.effect(() => ctx.tools.register(defineTool({
     name: 'n8n_list_workflows',
-    description: 'List n8n workflows visible to the configured API key.',
+    description: 'List n8n workflows visible to the configured API key. Each entry includes editorUrl — use it, never construct a link by hand.',
     parameters: {
       active: { type: 'boolean', description: 'Filter by active status' },
       name: { type: 'string', description: 'Filter by exact workflow name' },
@@ -465,19 +535,57 @@ export function apply(ctx: Context, config: Config): void {
       if (args.name !== undefined) query.set('name', args.name)
       if (args.tags !== undefined) query.set('tags', args.tags)
       const qs = query.toString()
-      return asJson(await n8nRequest(ctx, config, qs === '' ? '/workflows' : `/workflows?${qs}`))
+      const result = await n8nRequest(ctx, config, qs === '' ? '/workflows' : `/workflows?${qs}`) as { data: N8nWorkflow[] }
+      return asJson({ ...result, data: result.data.map((w) => ({ ...w, editorUrl: editorWorkflowUrl(config, w.id) })) })
     },
   })), 'cordis-n8n: n8n_list_workflows')
 
   ctx.effect(() => ctx.tools.register(defineTool({
     name: 'n8n_get_workflow',
-    description: 'Get one n8n workflow by id, including its nodes and connections.',
+    description:
+      'Get one n8n workflow by id, including its nodes, connections, and editorUrl. '
+      + 'Use this to answer ANY question about a workflow\'s link asked separately from creating/editing it (the earlier tool result may no longer be in context) — read editorUrl from here, never guess, never use a placeholder like "<n8n-instance-url>", never invent a domain.',
     parameters: { workflowId: { type: 'string', required: true } },
     output: { schema: { type: 'json' }, render: renderJson },
     async execute(args) {
-      return asJson(await n8nRequest(ctx, config, `/workflows/${encodeURIComponent(args.workflowId)}`))
+      const workflow = await n8nRequest(ctx, config, `/workflows/${encodeURIComponent(args.workflowId)}`) as N8nWorkflow
+      return asJson({ ...workflow, editorUrl: editorWorkflowUrl(config, workflow.id) })
     },
   })), 'cordis-n8n: n8n_get_workflow')
+
+  ctx.effect(() => ctx.tools.register(defineTool({
+    name: 'n8n_describe_node',
+    description:
+      'Look up the real parameter schema for any n8n node type — every field name, valid enum value, default, and displayOptions gating condition, extracted directly from n8n\'s own installed node package (440+ node types). '
+      + 'Use this BEFORE guessing a node\'s parameters, and whenever n8n rejects a workflow with a validation error you can\'t immediately explain from SKILL.md alone — SKILL.md only covers the handful of nodes hit so far, this covers all of them.',
+    parameters: {
+      type: { type: 'string', required: true, description: 'Node type, either short ("httpRequest") or full ("n8n-nodes-base.httpRequest")' },
+      typeVersion: { type: 'number', description: 'Specific typeVersion to look up (e.g. 4.2). Omits to the node\'s defaultVersion when not given.' },
+    },
+    output: { schema: { type: 'json' }, render: renderJson },
+    async execute(args) {
+      const catalog = loadNodeCatalog()
+      const type = resolveCatalogType(args.type)
+      const entry = catalog.get(type)
+      if (entry === undefined) {
+        const needle = args.type.toLowerCase()
+        const suggestions = [...catalog.keys()].filter((t) => t.toLowerCase().includes(needle)).slice(0, 15)
+        return asJson({ error: `no node type "${type}" in the catalog`, suggestions })
+      }
+      const wantedVersion = args.typeVersion ?? entry.defaultVersion
+      const group = entry.versionGroups.find((g) => g.versions.includes(wantedVersion)) ?? entry.versionGroups.find((g) => g.versions.includes(entry.defaultVersion))
+      return asJson({
+        type: entry.type,
+        displayName: entry.displayName,
+        description: entry.description,
+        defaultVersion: entry.defaultVersion,
+        availableVersions: entry.versionGroups.flatMap((g) => g.versions),
+        builderHint: entry.builderHint,
+        matchedVersions: group?.versions,
+        properties: group?.properties ?? [],
+      })
+    },
+  })), 'cordis-n8n: n8n_describe_node')
 
   ctx.effect(() => ctx.tools.register(defineTool({
     name: 'n8n_validate_workflow',
@@ -504,9 +612,12 @@ export function apply(ctx: Context, config: Config): void {
 
   ctx.effect(() => ctx.tools.register(defineTool({
     name: 'n8n_upsert_workflow',
-    description: 'Create or update an n8n workflow. New workflows are always created inactive (n8n\'s own API guarantees this) and tagged session:<id>; use n8n_activate_workflow (requires human approval) to turn one on.',
+    description:
+      'Create or update an n8n workflow. New workflows are always created inactive (n8n\'s own API guarantees this) and tagged session:<id>; use n8n_activate_workflow (requires human approval) to turn one on. '
+      + 'If this conversation already has a workflowId from an earlier call (create OR edit), ALWAYS pass it again, even for a structural change (new trigger, renamed nodes, new name) — that is still editing the same workflow, not creating a new one. Omitting workflowId when one already exists in this conversation is refused.',
     parameters: {
-      workflowId: { type: 'string', description: 'Existing workflow id to update; omit to create a new workflow' },
+      workflowId: { type: 'string', description: 'Existing workflow id to update; omit ONLY when this conversation has never created a workflow yet' },
+      confirmNewWorkflow: { type: 'boolean', description: 'Set true to confirm you really want a SECOND, separate workflow in a conversation that already created one — rare; almost every edit should pass workflowId instead' },
       workflow: {
         type: 'json',
         required: true,
@@ -546,11 +657,24 @@ export function apply(ctx: Context, config: Config): void {
         const existing = await n8nRequest(ctx, config, `/workflows?name=${encodeURIComponent((workflow as { name: string }).name)}`) as { data: N8nWorkflow[] }
         workflowId = existing.data[0]?.id
       }
+      const sessionId = exec.agent?.session.id
+      if (workflowId === undefined && sessionId !== undefined && args.confirmNewWorkflow !== true) {
+        const already = sessionWorkflowMemory.get(sessionId)
+        if (already !== undefined && already.size > 0) {
+          const list = [...already.entries()].map(([id, name]) => `${id} (${name})`).join(', ')
+          throw new Error(
+            `This conversation already created ${String(already.size)} workflow(s) here: ${list}. `
+            + 'If this call is an edit of one of them, retry with that workflowId — regenerating the workflow from scratch with a new name is still an edit, not a new workflow. '
+            + 'If you genuinely want an additional, separate workflow, retry with confirmNewWorkflow: true.',
+          )
+        }
+      }
       if (workflowId !== undefined) {
         const updated = await n8nRequest(ctx, config, `/workflows/${encodeURIComponent(workflowId)}`, {
           method: 'PUT',
           body: JSON.stringify(workflow),
         }) as N8nWorkflow
+        if (sessionId !== undefined) rememberSessionWorkflow(sessionId, updated.id, updated.name)
         return asJson({ ...updated, editorUrl: editorWorkflowUrl(config, updated.id) })
       }
       const created = await n8nRequest(ctx, config, '/workflows', {
@@ -562,6 +686,7 @@ export function apply(ctx: Context, config: Config): void {
       // provenance ("which chat made this"), just no longer the dashboard
       // filter key (see /automations route's own comment) — and now also
       // what the de-dup check above matches against.
+      if (sessionId !== undefined) rememberSessionWorkflow(sessionId, created.id, created.name)
       const wantedTags: (string | undefined)[] = []
       if (exec.agent !== undefined) wantedTags.push(await getOrCreateTag(ctx, config, `session:${exec.agent.session.id}`))
       const tagIds = wantedTags.filter((id): id is string => id !== undefined)
