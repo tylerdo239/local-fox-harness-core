@@ -10,8 +10,7 @@
 // `:root[data-theme="dark"]` block, so setting the attribute is the whole
 // mechanism, no other wiring needed.
 import { useEffect, useState } from 'react'
-
-const STORAGE_THEME = 'cordis/theme'
+import { STORAGE_THEME } from './theme-storage-key'
 
 export type Theme = 'light' | 'dark'
 

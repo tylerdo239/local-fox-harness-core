@@ -155,7 +155,20 @@ function ConfigTab() {
       <CredentialField
         refName="N8N_API_KEY"
         title={t('settings.n8nApiKeyTitle')}
-        hint={t('settings.n8nApiKeyHint')}
+        hint={(
+          <>
+            {t('settings.n8nApiKeyHint')}{' '}
+            {/* Real route confirmed by grepping the running n8n container's
+                own bundled frontend JS for "/settings/api" — not guessed.
+                127.0.0.1:5678 matches this app's own real deployment
+                convention (both docker-compose and dev mode publish n8n's
+                editor on that exact host:port), same as Serper's own
+                hardcoded link above. */}
+            <a href="http://127.0.0.1:5678/settings/api" target="_blank" rel="noopener noreferrer" className="text-accent-text underline">
+              Settings → API
+            </a>
+          </>
+        )}
         placeholder={t('settings.n8nApiKeyPlaceholder')}
       />
       <CredentialField
