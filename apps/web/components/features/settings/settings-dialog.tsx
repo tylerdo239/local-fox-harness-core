@@ -27,7 +27,7 @@
 // API key + webhook secret since all three are the same shape of thing
 // (an external service's "set once at first start" secret, exactly like
 // Serper already was) rather than scattering them across tabs.
-import { useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { X, KeyRound, LogOut, Moon, Palette, Settings as ConfigIcon, Sun } from 'lucide-react'
 import { listCredentials, setCredential, unsetCredential } from '../../../lib/api'
@@ -123,21 +123,36 @@ function CredentialField({
   )
 }
 
+// User request (2026-09-22): dropped the OPENAI_API_KEY/OPENAI_BASE_URL
+// fields that used to live here (see git history for the 2026-09-18 comment
+// that added them). The self-hosted/default route is operator-configured
+// via .env (OPENAI_API_KEY/OPENAI_BASE_URL in repo-root .env, see
+// .env.example) at deploy time only, no longer end-user-editable through
+// this dialog — model-picker.tsx's own "self-hosted (default)" entry is
+// read-only display, not a target to reconfigure from the chat either.
+//
+// OPENROUTER_API_KEY below reopens part of what Đợt 6 above closed
+// ("an end user has no business choosing the route") — user request: a
+// second, user-switchable model route (OpenRouter) picked live in the chat
+// itself (composer's ModelPicker), not here. This tab still only ever holds
+// the SECRET; which model a given conversation uses lives in the chat, not
+// in Settings — see docs/add-openrouter-model-switch-plan.md.
 function ConfigTab() {
   const { t } = useLocale()
   return (
     <div className="flex flex-col gap-4">
       <CredentialField
-        refName="OPENAI_API_KEY"
-        title={t('settings.modelKeyTitle')}
-        hint={t('settings.modelKeyHint')}
-        placeholder={t('settings.modelKeyPlaceholder')}
-      />
-      <CredentialField
-        refName="OPENAI_BASE_URL"
-        title={t('settings.modelBaseUrlTitle')}
-        hint={t('settings.modelBaseUrlHint')}
-        placeholder={t('settings.modelBaseUrlPlaceholder')}
+        refName="OPENROUTER_API_KEY"
+        title={t('settings.openrouterKeyTitle')}
+        hint={(
+          <>
+            {t('settings.openrouterKeyHint')}{' '}
+            <a href="https://openrouter.ai/keys" target="_blank" rel="noopener noreferrer" className="text-accent-text underline">
+              openrouter.ai/keys
+            </a>
+          </>
+        )}
+        placeholder={t('settings.openrouterKeyPlaceholder')}
       />
       <CredentialField
         refName="SERPER_API_KEY"
@@ -250,9 +265,28 @@ function AccountTab({ onLogout }: { onLogout: () => void }) {
   )
 }
 
-export function SettingsDialog({ open, onClose, onLogout }: { open: boolean; onClose: () => void; onLogout: () => void }) {
+// initialTab — model-picker.tsx's "not configured" flow (page.tsx's own
+// settingsRequest.tab) jumps straight to Config instead of landing on
+// General and leaving the user to find the OpenRouter field themselves.
+export function SettingsDialog({ open, onClose, onLogout, initialTab }: { open: boolean; onClose: () => void; onLogout: () => void; initialTab?: Tab }) {
   const { t } = useLocale()
-  const [tab, setTab] = useState<Tab>('general')
+  const [tab, setTab] = useState<Tab>(initialTab ?? 'general')
+
+  // Real bug found live (2026-09-22): page.tsx renders this component
+  // UNCONDITIONALLY (`<SettingsDialog open={...} .../>`, not
+  // `{open && <SettingsDialog .../>}`) — `if (!open) return null` below only
+  // skips the DOM output, it does NOT unmount the component, so this
+  // instance's hooks (including `tab`'s useState above) persist across every
+  // open/close. `useState`'s initializer argument only runs on the very
+  // FIRST mount (when the app itself loads), so `initialTab` changing on a
+  // later open was silently ignored — Settings kept landing on whatever tab
+  // it last had open, never actually jumping to Config. Re-syncing here,
+  // on the open:false->true edge, is what actually makes a later initialTab
+  // change take effect.
+  useEffect(() => {
+    if (open) setTab(initialTab ?? 'general')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open])
 
   if (!open) return null
 

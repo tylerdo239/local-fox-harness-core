@@ -38,6 +38,13 @@ import type {} from '@deepseek-ai/dsh-skill'
 // maxOutputTokens:64/timeoutMs:60000 — already applies). This import only
 // pulls in the Context augmentation so `ctx.sessionTitle` type-checks.
 import type {} from '@deepseek-ai/dsh-session-title'
+// Pulls in the Context augmentation so `ctx.sessionController` type-checks —
+// the package is already mounted (dsh-web-app depends on it transitively;
+// confirmed via `dsh --profile cordis-app --dump-config`, `id: session-
+// controller` present, never disabled). See docs/add-openrouter-model-
+// switch-plan.md for why this plugin now uses its selectModel()/
+// modelCatalog() instead of rolling its own.
+import type {} from '@deepseek-ai/dsh-api-session-controller'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 
 export const name = 'cordis-gateway'
@@ -48,7 +55,12 @@ export const name = 'cordis-gateway'
 // failure while writing this). 'llm' and 'credentials' back the P3 model +
 // credential routes below. 'skills' backs Phase H's read-only /skills route.
 // 'sessionTitle' backs Đợt 2 Phase I's title/rename routes.
-export const inject = ['connection', 'agents', 'sessions', 'sessionQuery', 'agentDefaultModel', 'approval', 'llm', 'credentials', 'skills', 'sessionTitle']
+// 'sessionController' backs /model-catalog and /session-select-model — the
+// user-facing "switch model for this chat" feature (see
+// docs/add-openrouter-model-switch-plan.md). @deepseek-ai/dsh-api-session-
+// controller is already mounted by dsh-web-app; this only starts USING its
+// ctx.sessionController service, not adding a new package.
+export const inject = ['connection', 'agents', 'sessions', 'sessionQuery', 'agentDefaultModel', 'approval', 'llm', 'credentials', 'skills', 'sessionTitle', 'sessionController']
 
 // Fixed set of credential references the Models settings page describes
 // without a query — covers the OpenAI-compatible gateways the architecture
@@ -68,6 +80,25 @@ const KNOWN_CREDENTIAL_REFS = [
   'DEEPSEEK_API_KEY', 'OPENAI_API_KEY', 'OPENAI_BASE_URL', 'ANTHROPIC_API_KEY', 'OPENROUTER_API_KEY', 'SERPER_API_KEY',
   'N8N_API_KEY', 'N8N_WEBHOOK_SECRET',
 ] as const
+
+// The provider id @cordis-app/llm-openai-compat registers under — matches
+// packages/llm/openai-compat/cordis.patch.yml's own `provider: openai-compat`.
+// Used by /model-catalog below to always surface this deployment's
+// self-hosted route, independent of ctx.agentDefaultModel's CURRENT
+// selection. Real bug found live (2026-09-22): the model picker used to
+// build its "self-hosted" entry from ctx.sessionController.modelCatalog()'s
+// own `default` field — which is the MUTABLE deployment default (changeable
+// via POST /model or a session-local select), not a fixed pointer to this
+// route. Once something moved `default` to openrouter, the synthesized
+// entry's id collided with the real openrouter group's id (both
+// 'openrouter'), and React silently dropped one — the self-hosted entry
+// vanished from the dropdown with no error anywhere. openai-compat's
+// adapter has no listModels() override (confirmed: it never appears in
+// modelCatalog()'s own `groups`), so there is no live catalog to read its
+// configured model from either — OPENAI_MODEL_ID (the same env var
+// packages/llm/openai-compat/cordis.patch.yml's own agent-default-model
+// override reads) is the actual fixed, boot-time source of truth.
+const SELF_HOSTED_PROVIDER = 'openai-compat'
 
 const API_PREFIX = '/api/v1'
 // ctx.connection.fetch.register()'s own ConnectionFetchMethod type is fixed
@@ -358,27 +389,58 @@ export function apply(ctx: Context): void {
     },
   })
 
-  registerRoute(ctx, '/model-providers', {
-    // Live-registered routes plus every configurable-but-dormant route an
-    // adapter declares (dsh-llm-pi-ai's own catalog and any custom route a
-    // profile patch adds to its `providers` map) — real ctx.llm APIs, not a
-    // hand-rolled catalog, so this never drifts from what can actually serve
-    // a request.
-    GET: async () => json({
-      providers: ctx.llm.listProviders(),
-      configurable: ctx.llm.listConfigurableProviders(),
-    }),
+  // Replaces the old /model-providers + /model-catalog?provider= pair (2
+  // round trips, raw ctx.llm.listProviders()/listConfigurableProviders()/
+  // listModels(), not session-aware, no per-provider failure reason).
+  // ctx.sessionController.modelCatalog() already groups by provider, names
+  // the deployment default, and reports WHY an unconfigured provider (e.g.
+  // OpenRouter with no credential yet) can't serve a request — one call, no
+  // hand-rolled catalog. Confirmed unused by any prior frontend code before
+  // removing the 2 old routes (see docs/add-openrouter-model-switch-plan.md).
+  registerRoute(ctx, '/model-catalog', {
+    GET: async () => {
+      const catalog = await ctx.sessionController.modelCatalog()
+      // Prepended, not merged into whatever catalog.groups already has — the
+      // real API response confirmed openai-compat never appears there on
+      // its own (see SELF_HOSTED_PROVIDER's own comment for why), so there
+      // is nothing to collide with.
+      const selfHostedModel = process.env.OPENAI_MODEL_ID ?? 'unconfigured-model'
+      const selfHostedGroup = {
+        id: SELF_HOSTED_PROVIDER,
+        name: SELF_HOSTED_PROVIDER,
+        models: [{ id: selfHostedModel, name: selfHostedModel }],
+      }
+      return json({ ...catalog, groups: [selfHostedGroup, ...catalog.groups] })
+    },
   })
 
-  registerRoute(ctx, '/model-catalog', {
-    GET: async (request) => {
-      const url = new URL(request.url)
-      const provider = url.searchParams.get('provider')
-      if (provider === null) return badRequest('missing provider')
+  // Session-local model override — distinct from POST /model above, which
+  // only sets the deployment DEFAULT for sessions created after it. This
+  // changes the model of ONE already-live (or cold, auto-resumed) session,
+  // taking effect from its next step (ctx.sessionController's own contract:
+  // "Select one Session-local model after explicitly resuming the Session").
+  registerRoute(ctx, '/session-select-model', {
+    POST: async (request) => {
+      const body = await readJson(request)
+      const sessionId = requireString(body, 'sessionId')
+      const provider = requireString(body, 'provider')
+      const model = requireString(body, 'model')
+      if (sessionId === undefined || provider === undefined || model === undefined) {
+        return badRequest('sessionId, provider and model are required')
+      }
+      const agent = await resolveAgent(ctx, SessionId(sessionId))
+      if (agent === undefined) return notFoundResponse(`session ${sessionId} not found`)
+      const reasoningEffort = requireString(body, 'reasoningEffort')
       try {
-        return json({ models: await ctx.llm.listModels(provider) })
+        const result = await ctx.sessionController.selectModel({
+          sessionId: SessionId(sessionId),
+          provider,
+          model,
+          ...reasoningEffort === undefined ? {} : { reasoningEffort: ReasoningEffortId(reasoningEffort) },
+        })
+        return json(result)
       } catch (error) {
-        return notFoundResponse(error instanceof Error ? error.message : `provider ${provider} not found`)
+        return badRequest(error instanceof Error ? error.message : String(error))
       }
     },
   })

@@ -169,6 +169,50 @@ export function getAuthStatus(): Promise<{ ok: true }> {
   return request('/auth/status')
 }
 
+// Model picker (composer.tsx's ModelPicker) — see
+// docs/add-openrouter-model-switch-plan.md. Mirrors gateway.ts's
+// /model-catalog response verbatim (ctx.sessionController.modelCatalog()
+// passed through), and /session-select-model's request/response shape.
+// Distinct from getModel/setModel-era functions removed at Đợt 6: those set
+// the DEPLOYMENT default for new sessions; selectSessionModel below changes
+// only the ONE session passed to it.
+
+export interface ModelCatalogModel {
+  readonly id: string
+  readonly name: string
+  readonly description?: string
+}
+
+export interface ModelProviderGroup {
+  readonly id: string
+  readonly name: string
+  readonly models: readonly ModelCatalogModel[]
+}
+
+export interface ModelCatalogFailure {
+  readonly id: string
+  readonly name: string
+  readonly message: string
+}
+
+export interface ModelCatalog {
+  readonly default: { readonly provider: string; readonly model: string }
+  readonly routableProviders: readonly string[]
+  readonly groups: readonly ModelProviderGroup[]
+  readonly failures: readonly ModelCatalogFailure[]
+}
+
+export function getModelCatalog(): Promise<ModelCatalog> {
+  return request('/model-catalog')
+}
+
+export function selectSessionModel(
+  sessionId: string,
+  selection: { provider: string; model: string },
+): Promise<{ selected: { provider: string; model: string } }> {
+  return request('/session-select-model', { method: 'POST', body: JSON.stringify({ sessionId, ...selection }) })
+}
+
 // Phase H — SkillsDialog, view-only at first: mirrors dsh-skill's own
 // SkillSummary shape (gateway.ts's /skills route passes ctx.skills.list()
 // through verbatim) — no content field, that's SkillDefinition

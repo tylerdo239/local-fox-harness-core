@@ -30,6 +30,7 @@ import { SkillsDialog } from '../components/features/skills/skills-dialog'
 import { Automations } from '../components/features/automations/automations'
 import { LoginForm } from '../components/features/auth/login-form'
 import { Sidebar } from '../components/features/sidebar/sidebar'
+import { ToastHost } from '../components/primitives/toast'
 
 function LoadingScreen() {
   return (
@@ -206,6 +207,25 @@ function AppFrame() {
     logout().catch(() => {}).finally(() => { window.location.href = '/' })
   }
 
+  // model-picker.tsx bumps this (via useChatStore's requestOpenSettings) when
+  // the user clicks an unconfigured OpenRouter model — it has no direct
+  // handle on this component's own `dialog` state (nested under Composer,
+  // several levels below where `dialog` lives). Skipped on the initial
+  // render (id 0, the store's own default) so mounting the app doesn't pop
+  // Settings open on its own. `tab` rides along so this same request can
+  // jump straight to the Config tab (real gap: bare "open Settings" landed
+  // on General, leaving the user to find the OpenRouter field themselves)
+  // — settingsInitialTab is reset to undefined by every OTHER opener below
+  // (Sidebar's own Settings icon) so a stale 'config' from an earlier
+  // model-picker request can't leak into an unrelated manual open.
+  const settingsRequest = useChatStore(state => state.settingsRequest)
+  const [settingsInitialTab, setSettingsInitialTab] = useState<'config' | undefined>(undefined)
+  useEffect(() => {
+    if (settingsRequest.id === 0) return
+    setSettingsInitialTab(settingsRequest.tab)
+    setDialog('settings')
+  }, [settingsRequest])
+
   return (
     <div ref={frameRef} className="grid h-dvh" style={{ gridTemplateColumns }}>
       <Sidebar
@@ -223,7 +243,7 @@ function AppFrame() {
         newSessionDisabled={newSessionDisabled}
         activeSessionId={sessionId}
         onSwitchSession={switchSession}
-        onOpenSettings={() => { setDialog('settings') }}
+        onOpenSettings={() => { setSettingsInitialTab(undefined); setDialog('settings') }}
         onOpenSkills={() => { setDialog('skills') }}
         onOpenAutomations={() => { goToAutomations() }}
         onLogout={handleLogout}
@@ -237,8 +257,9 @@ function AppFrame() {
           <ChatView sessionId={sessionId} />
         )}
       </div>
-      <SettingsDialog open={dialog === 'settings'} onClose={() => { setDialog(undefined) }} onLogout={handleLogout} />
+      <SettingsDialog open={dialog === 'settings'} initialTab={settingsInitialTab} onClose={() => { setDialog(undefined) }} onLogout={handleLogout} />
       <SkillsDialog open={dialog === 'skills'} onClose={() => { setDialog(undefined) }} />
+      <ToastHost />
     </div>
   )
 }

@@ -63,6 +63,7 @@ import { useMutation, useQuery } from '@tanstack/react-query'
 import { interruptSession, listSkills, sendMessage, type SkillSummary } from '../../../lib/api'
 import { useChatStore } from '../../../lib/store'
 import { latestTurnStartSeq, runningState } from './conversation'
+import { ModelPicker } from './model-picker'
 import { RunStatus } from './run-status'
 import { useLocale } from '../../../lib/i18n/locale'
 import { Button } from '../../primitives/button'
@@ -238,6 +239,11 @@ export function Composer({ sessionId, large = false }: { sessionId: string; larg
             task, same reason the button logic below doesn't trust
             `run.running` directly either. */}
         <RunStatus run={{ ...run, running }} />
+        {/* Session-local only — does not touch the deployment default new
+            sessions get (ctx.agentDefaultModel), see model-picker.tsx's own
+            header comment. Disabled while running so a switch clicked mid-
+            turn can't look like it silently did nothing. */}
+        <ModelPicker sessionId={sessionId} disabled={running} />
         <div className="ml-auto flex items-center gap-2">
           {running ? (
             // Running: ONLY the Stop button — no Send, no Cancel task yet
