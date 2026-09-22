@@ -302,6 +302,44 @@ function coerceJsonArg(value: unknown): unknown {
   }
 }
 
+const WORKFLOW_ARG_DESCRIPTION =
+  'A real JSON object (not a JSON-encoded string) shaped {name, nodes, connections, settings}. '
+  + 'Example: {"name":"My flow","nodes":[{"id":"1","name":"Manual Trigger","type":"n8n-nodes-base.manualTrigger","typeVersion":1,"position":[0,0],"parameters":{}}],"connections":{},"settings":{}}. '
+  + 'For anything past a couple of trivial nodes, prefer workflowFile instead — embedding a large nested object as a tool-call argument is exactly where JSON-escaping mistakes happen (unbalanced quotes inside jsCode strings, Vietnamese text, etc.), confirmed for real across many sessions.'
+
+const WORKFLOW_FILE_ARG_DESCRIPTION =
+  'Path to a JSON file containing the same shape as `workflow` — write it first with the `write` tool, then pass its path here instead of inlining the object. '
+  + 'Strongly preferred over `workflow` for anything non-trivial: writing a file is a single string argument (no nested-JSON escaping), while inlining a large `workflow` object repeatedly produces malformed JSON from smaller models. '
+  + 'Exactly one of `workflow`/`workflowFile` is required.'
+
+// Real bug found and fixed (user: "tiếp làm sao cho hoàn thiện và không còn
+// bug" — following up on a real test where the model gave up on inlining a
+// 4-node workflow after 3 separate malformed-JSON failures across
+// n8n_validate_workflow/n8n_upsert_workflow, fell back to writing a JSON file
+// with the `write` tool, then never actually called n8n_upsert_workflow
+// again — the file just sat in the workspace, workflow never created).
+// Reading a file the model already wrote is strictly less capability than
+// what the standard `write`/`read` tools already grant it (same workspace,
+// same container filesystem — `workspace:/workspace` in docker-compose.yml),
+// so no sandbox/approval integration is needed here, just a plain read.
+function resolveWorkflowArg(args: { workflow?: unknown; workflowFile?: string }): unknown {
+  if (args.workflowFile !== undefined) {
+    let text: string
+    try {
+      text = readFileSync(args.workflowFile, 'utf8')
+    } catch (err) {
+      throw new Error(`could not read workflowFile "${args.workflowFile}": ${err instanceof Error ? err.message : String(err)}`)
+    }
+    try {
+      return JSON.parse(text)
+    } catch (err) {
+      throw new Error(`workflowFile "${args.workflowFile}" is not valid JSON: ${err instanceof Error ? err.message : String(err)}`)
+    }
+  }
+  if (args.workflow !== undefined) return coerceJsonArg(args.workflow)
+  throw new Error('provide exactly one of workflow or workflowFile')
+}
+
 const WEBHOOK_TYPE = 'n8n-nodes-base.webhook'
 const RESPOND_TYPE = 'n8n-nodes-base.respondToWebhook'
 const STICKY_NOTE_TYPE = 'n8n-nodes-base.stickyNote'
@@ -358,6 +396,17 @@ function checkFlow(nodes: readonly { name: string; type: string; parameters?: Re
 }
 
 /** Local structural check before any round trip — n8n itself would reject a malformed workflow, but with a less actionable error. */
+/** Depth-bounded scan for any object key containing "credential" (case-insensitive) — see the caller's own comment for why this is always wrong wherever it appears inside a node's `parameters`. */
+function findCredentialLikeKey(value: unknown, depth = 0): string | undefined {
+  if (depth > 4 || typeof value !== 'object' || value === null) return undefined
+  for (const [key, nested] of Object.entries(value as Record<string, unknown>)) {
+    if (key.toLowerCase().includes('credential')) return key
+    const found = findCredentialLikeKey(nested, depth + 1)
+    if (found !== undefined) return found
+  }
+  return undefined
+}
+
 function validateWorkflowStructure(workflow: unknown): { valid: boolean; errors: string[] } {
   const errors: string[] = []
   if (typeof workflow === 'string') {
@@ -384,6 +433,20 @@ function validateWorkflowStructure(workflow: unknown): { valid: boolean; errors:
       if (!Array.isArray(n.position) || n.position.length !== 2) errors.push(`nodes[${String(i)}].position must be a [x, y] pair`)
       if (typeof n.name === 'string' && typeof n.type === 'string') {
         nodes.push({ name: n.name, type: n.type, parameters: n.parameters as Record<string, unknown> | undefined })
+        // Real bug found and fixed (user: "các task sửa n8n cho dùng gmail
+        // thông minh hơn xong hết chưa" — following up on a real test where
+        // the model, despite n8n_list_credentials existing and SKILL.md's
+        // credential-attachment example, still invented a field named
+        // `gmailCredential` INSIDE `parameters` to carry the credential id
+        // instead of using the real `credentials` key at the node's top
+        // level). No real n8n node has a `parameters` field whose name
+        // contains "credential" — that concept lives exclusively in the
+        // sibling `credentials` key — so this is safe to flag generically
+        // for every node type at once, not just gmail.
+        const leak = findCredentialLikeKey(n.parameters)
+        if (leak !== undefined) {
+          errors.push(`nodes[${String(i)}] ("${n.name}") has "${leak}" inside parameters — no real n8n node takes a credential through parameters; attach it via the node's own top-level "credentials" key instead (see n8n_list_credentials)`)
+        }
       }
     }
   }
@@ -479,6 +542,36 @@ function loadNodeCatalog(): ReadonlyMap<string, N8nCatalogEntry> {
 /** Accepts either the short display name ("httpRequest") or the full technical type ("n8n-nodes-base.httpRequest") — the exact ambiguity SKILL.md already warns models about. */
 function resolveCatalogType(input: string): string {
   return input.startsWith('n8n-nodes-base.') ? input : `n8n-nodes-base.${input}`
+}
+
+// Real bug found and fixed (user: "thử prompt tìm gmail... config các
+// filters cho chuẩn"): even after the model correctly called
+// n8n_describe_node and spent 10+ read/grep calls paging through the
+// result (a multi-resource node like `gmail` returns 80+ properties across
+// every resource × operation combination, large enough to spill to a file
+// rather than fit inline), it STILL wrote fabricated field names
+// (`filterType`/`query`/`maxResults` — none of which exist on
+// message/getAll) — plausibly because it lost track of which section it
+// was reading partway through. Narrowing the response to just the
+// requested resource/operation up front removes the need to page through
+// irrelevant sections at all.
+function propertyAppliesTo(displayOptions: unknown, key: 'resource' | 'operation', wanted: string): boolean {
+  if (typeof displayOptions !== 'object' || displayOptions === null) return true
+  const show = (displayOptions as { show?: unknown }).show
+  if (typeof show !== 'object' || show === null) return true
+  const constraint = (show as Record<string, unknown>)[key]
+  if (!Array.isArray(constraint)) return true
+  return constraint.includes(wanted)
+}
+
+function filterPropertiesFor(properties: readonly unknown[], resource: string | undefined, operation: string | undefined): readonly unknown[] {
+  if (resource === undefined && operation === undefined) return properties
+  return properties.filter((p) => {
+    if (typeof p !== 'object' || p === null) return true
+    const displayOptions = (p as { displayOptions?: unknown }).displayOptions
+    return (resource === undefined || propertyAppliesTo(displayOptions, 'resource', resource))
+      && (operation === undefined || propertyAppliesTo(displayOptions, 'operation', operation))
+  })
 }
 
 // Real bug found and fixed (user: "khi đang chat mà sửa gì Agent tự tạo ra 1
@@ -723,10 +816,13 @@ export function apply(ctx: Context, config: Config): void {
     name: 'n8n_describe_node',
     description:
       'Look up the real parameter schema for any n8n node type — every field name, valid enum value, default, and displayOptions gating condition, extracted directly from n8n\'s own installed node package (440+ node types). '
-      + 'Use this BEFORE guessing a node\'s parameters, and whenever n8n rejects a workflow with a validation error you can\'t immediately explain from SKILL.md alone — SKILL.md only covers the handful of nodes hit so far, this covers all of them.',
+      + 'Use this BEFORE guessing a node\'s parameters, and whenever n8n rejects a workflow with a validation error you can\'t immediately explain from SKILL.md alone — SKILL.md only covers the handful of nodes hit so far, this covers all of them. '
+      + 'For a multi-resource node (gmail, slack, ...) ALWAYS pass resource/operation once you know them — the unfiltered response can be 80+ properties across every resource×operation combination, easy to lose track of midway through; the filtered response is just the handful of fields that actually apply.',
     parameters: {
       type: { type: 'string', required: true, description: 'Node type, either short ("httpRequest") or full ("n8n-nodes-base.httpRequest")' },
       typeVersion: { type: 'number', description: 'Specific typeVersion to look up (e.g. 4.2). Omits to the node\'s defaultVersion when not given.' },
+      resource: { type: 'string', description: 'Narrow to fields that apply to this "resource" value only (e.g. "message" for the gmail node) — call once without it first if you don\'t yet know the valid resource values' },
+      operation: { type: 'string', description: 'Narrow to fields that apply to this "operation" value only (e.g. "getAll") — combine with resource for the tightest, smallest result' },
     },
     output: { schema: { type: 'json' }, render: renderJson },
     async execute(args) {
@@ -748,7 +844,7 @@ export function apply(ctx: Context, config: Config): void {
         availableVersions: entry.versionGroups.flatMap((g) => g.versions),
         ...(entry.builderHint !== undefined ? { builderHint: entry.builderHint } : {}),
         ...(group !== undefined ? { matchedVersions: group.versions } : {}),
-        properties: group?.properties ?? [],
+        properties: filterPropertiesFor(group?.properties ?? [], args.resource, args.operation),
       })
     },
   })), 'cordis-n8n: n8n_describe_node')
@@ -757,22 +853,17 @@ export function apply(ctx: Context, config: Config): void {
     name: 'n8n_validate_workflow',
     description: 'Locally validate an n8n workflow object\'s structure before creating or updating it with n8n_upsert_workflow. Does not call the n8n API.',
     parameters: {
-      workflow: {
-        type: 'json',
-        required: true,
-        // Real gap found via a live test: a weaker model passed this as a
-        // JSON-encoded STRING instead of a nested object literal (twice in
-        // a row, the second attempt not even valid JSON) — a concrete,
-        // minimal, CORRECT example nudges the model toward the right shape
-        // far more reliably than a bare field list ever did.
-        description:
-          'A real JSON object (not a JSON-encoded string) shaped {name, nodes, connections, settings}. '
-          + 'Example: {"name":"My flow","nodes":[{"id":"1","name":"Manual Trigger","type":"n8n-nodes-base.manualTrigger","typeVersion":1,"position":[0,0],"parameters":{}}],"connections":{},"settings":{}}',
-      },
+      // Real gap found via a live test: a weaker model passed this as a
+      // JSON-encoded STRING instead of a nested object literal (twice in
+      // a row, the second attempt not even valid JSON) — a concrete,
+      // minimal, CORRECT example nudges the model toward the right shape
+      // far more reliably than a bare field list ever did.
+      workflow: { type: 'json', description: WORKFLOW_ARG_DESCRIPTION },
+      workflowFile: { type: 'string', description: WORKFLOW_FILE_ARG_DESCRIPTION },
     },
     output: { schema: { type: 'json' }, render: renderJson },
     async execute(args) {
-      return asJson(validateWorkflowStructure(coerceJsonArg(args.workflow)))
+      return asJson(validateWorkflowStructure(resolveWorkflowArg(args)))
     },
   })), 'cordis-n8n: n8n_validate_workflow')
 
@@ -784,17 +875,12 @@ export function apply(ctx: Context, config: Config): void {
     parameters: {
       workflowId: { type: 'string', description: 'Existing workflow id to update; omit ONLY when this conversation has never created a workflow yet' },
       confirmNewWorkflow: { type: 'boolean', description: 'Set true to confirm you really want a SECOND, separate workflow in a conversation that already created one — rare; almost every edit should pass workflowId instead' },
-      workflow: {
-        type: 'json',
-        required: true,
-        description:
-          'A real JSON object (not a JSON-encoded string) shaped {name, nodes, connections, settings}. '
-          + 'Example: {"name":"My flow","nodes":[{"id":"1","name":"Manual Trigger","type":"n8n-nodes-base.manualTrigger","typeVersion":1,"position":[0,0],"parameters":{}}],"connections":{},"settings":{}}',
-      },
+      workflow: { type: 'json', description: WORKFLOW_ARG_DESCRIPTION },
+      workflowFile: { type: 'string', description: WORKFLOW_FILE_ARG_DESCRIPTION },
     },
     output: { schema: { type: 'json' }, render: renderJson },
     async execute(args, exec) {
-      const workflow = coerceJsonArg(args.workflow)
+      const workflow = resolveWorkflowArg(args)
       const { valid, errors } = validateWorkflowStructure(workflow)
       if (!valid) throw new Error(`workflow failed local validation: ${errors.join('; ')}`)
       let workflowId = args.workflowId

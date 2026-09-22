@@ -175,6 +175,12 @@ Sau patch + `docker compose restart core`:
    khiến `n8n_upsert_workflow` báo `isError: true` dù workflow đã tồn tại — kiểm tra lại
    bằng `n8n_list_workflows` trước khi gọi lại `n8n_upsert_workflow` (không có `workflowId`
    sẽ tạo trùng thêm 1 bản).
+   Thêm `credential:list`/`credential:read` (tool `n8n_list_credentials`, thêm sau đợt
+   viết docs này) — thiếu 2 scope này thì `n8n_list_credentials` báo `Forbidden` mọi lần,
+   dính thật lúc regenerate API key sau khi reset n8n vì danh sách scope ở trên (viết
+   trước khi tool này tồn tại) chưa có nó. Danh sách đầy đủ, đúng nhất tại thời điểm này:
+   `workflow:create/read/update/list/activate/deactivate`, `tag:create/read/update/list`,
+   `workflowTags:update/list`, `execution:read/list`, `credential:list/read`.
 2. **Bắt buộc, dễ quên nhất — đã tự dính lỗi này khi test thật:** mỗi `workspacePath` khai
    ở trên phải là một thư mục **ĐÃ TỒN TẠI SẴN** trước khi workflow đó trigger lần đầu:
    ```sh

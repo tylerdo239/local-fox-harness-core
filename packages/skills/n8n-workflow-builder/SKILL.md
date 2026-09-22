@@ -10,18 +10,40 @@ App này có mười tool: `n8n_describe_node`, `n8n_list_workflows`,
 `n8n_activate_workflow`, `n8n_run_workflow`, `n8n_list_executions`,
 `n8n_get_execution`, `n8n_list_credentials`.
 
-`n8n_describe_node(type, typeVersion?)` tra thẳng vào một kho dữ liệu trích
-xuất từ chính n8n-nodes-base thật (440+ node, mọi field/enum/điều kiện
-`displayOptions`, kèm `builderHint` — gợi ý cấu hình do chính n8n viết sẵn
-cho từng node khi có) — không phải đoán hay nhớ. Dùng nó bất cứ khi nào cần
-1 node KHÔNG nằm trong danh sách quen thuộc bên dưới, hoặc khi n8n báo lỗi
-validate mà mục "Tham số hay cần" chưa giải thích được. Danh sách dưới đây
-chỉ là các node hay gặp nhất và những lỗi cụ thể đã từng thấy — không phải
-toàn bộ kiến thức n8n có; đừng dừng lại ở nó khi `n8n_describe_node` trả lời
-được câu hỏi trực tiếp hơn.
+`n8n_describe_node(type, typeVersion?, resource?, operation?)` tra thẳng vào
+một kho dữ liệu trích xuất từ chính n8n-nodes-base thật (440+ node, mọi
+field/enum/điều kiện `displayOptions`, kèm `builderHint` — gợi ý cấu hình do
+chính n8n viết sẵn cho từng node khi có) — không phải đoán hay nhớ. Dùng nó
+bất cứ khi nào cần 1 node KHÔNG nằm trong danh sách quen thuộc bên dưới, hoặc
+khi n8n báo lỗi validate mà mục "Tham số hay cần" chưa giải thích được. Danh
+sách dưới đây chỉ là các node hay gặp nhất và những lỗi cụ thể đã từng thấy —
+không phải toàn bộ kiến thức n8n có; đừng dừng lại ở nó khi `n8n_describe_node`
+trả lời được câu hỏi trực tiếp hơn.
+**Node nhiều resource (gmail, slack...) LUÔN truyền kèm `resource`/`operation`
+ngay khi đã biết** — không gọi trống rồi tự lọc bằng mắt. Lỗi thật đã gặp: gọi
+`n8n_describe_node("gmail")` không kèm resource/operation trả về 60+ property
+gộp chung mọi resource×operation, kết quả dài tới mức bị đẩy ra file riêng,
+model phải đọc/grep qua nhiều lần theo từng đoạn offset — và vẫn viết sai tên
+field cuối cùng (bịa ra `filterType`/`query`/`maxResults` không hề tồn tại)
+vì lạc mất đoạn đang đọc dở. Gọi kèm resource/operation
+(`n8n_describe_node("gmail", 2.2, "message", "getAll")`) chỉ trả về đúng ~10
+property liên quan, đọc một lần là đủ, không cần phân trang.
 
 ## Quy trình
 
+0. **Workflow từ 3 node trở lên, hoặc có bất kỳ node `code` nào: dùng
+   `workflowFile`, đừng nhồi `workflow` trực tiếp vào tool call.** Ghi JSON
+   ra file bằng tool `write` trước (ví dụ
+   `/workspace/<id>/workflow.json`), rồi truyền path đó vào tham số
+   `workflowFile` của `n8n_validate_workflow`/`n8n_upsert_workflow` — bỏ hẳn
+   `workflow`. Lỗi thật đã lặp lại nhiều lần: nhồi thẳng object lồng nhau lớn
+   (đặc biệt khi có `jsCode` chứa dấu ngoặc kép/`\n`/tiếng Việt) vào MỘT
+   tham số tool call sinh JSON hỏng liên tục (`Expected ',' or '}'...`) —
+   model từng thử 3 lần liền đều hỏng, cuối cùng bỏ cuộc, ghi file rồi KHÔNG
+   BAO GIỜ gọi lại `n8n_upsert_workflow` nữa (workflow không được tạo, dù
+   file JSON có nằm sẵn trong workspace). Ghi ra file trước rồi truyền path
+   tránh được lỗi này hoàn toàn vì lúc đó chỉ có một tham số chuỗi đơn
+   giản (đường dẫn), không phải object lồng nhau.
 1. **Dựng workflow nhỏ nhất chạy được trước** — trigger cộng một hai node cốt
    lõi. Mở rộng dần bằng `n8n_upsert_workflow` kèm `workflowId`, mỗi lần thêm
    một việc.
@@ -79,7 +101,23 @@ lại để xem digest mới.
 
 Node cần đăng nhập vào dịch vụ khác (Gmail, Slack, API có khoá...) thì gọi
 `n8n_list_credentials` lấy `id` và `type` của credential để gắn vào node. Chưa
-có credential cần dùng thì báo người dùng tạo nó trong giao diện n8n.
+có credential cần dùng thì báo người dùng tạo nó trong giao diện n8n. Gắn vào
+node bằng khoá `credentials` (ngang hàng với `parameters`, không phải bên
+trong nó):
+```json
+{ "id": "1", "name": "Gmail Trigger", "type": "n8n-nodes-base.gmailTrigger",
+  "typeVersion": 1.4, "position": [0, 0], "parameters": { ... },
+  "credentials": { "gmailOAuth2": { "id": "<id từ n8n_list_credentials>", "name": "<name từ đó>" } } }
+```
+Thiếu khoá `credentials` là lý do thật của lỗi `n8n_activate_workflow` báo
+`Missing required credential: gmailOAuth2` dù workflow đã "tạo thành công" —
+tạo/sửa workflow không tự kiểm tra credential, chỉ activate mới kiểm.
+Không có node nào có field trong `parameters` chứa chữ "credential" — lỗi
+thật đã gặp: model tự bịa `"gmailCredential": {id, name}` bên trong
+`parameters` thay vì dùng đúng khoá `credentials` cấp node.
+`n8n_validate_workflow` giờ tự bắt lỗi này (bất kỳ key nào trong `parameters`
+chứa "credential" đều bị từ chối, kèm gợi ý sửa) — nhưng vẫn nên viết đúng
+ngay từ đầu, đừng dựa vào việc bị chặn rồi mới sửa.
 
 ## Viết node cho đúng
 
@@ -184,12 +222,162 @@ dùng tên chính xác hoặc dùng `httpRequest` gọi thẳng API của dịch
   lộ ra nếu export) — đây là đánh đổi chấp nhận được cho tới khi có tool tạo
   credential riêng; không tự ý chuyển sang `genericCredentialType` nếu chưa có
   credential thật đứng sau nó.
+  **TUYỆT ĐỐI KHÔNG** lấy `OPENAI_API_KEY`/bất kỳ credential nào của chính
+  Agent (nhìn thấy trong `.env`, system prompt, hay bất kỳ đâu trong phiên
+  làm việc) rồi nhét vào `headerParameters`/`body` của workflow n8n — lỗi thật
+  đã xảy ra: model tự copy key thật của Agent vào node HTTP Request rồi báo
+  "đã cấu hình xong". Key đó sẽ nằm vĩnh viễn trong n8n, ai có quyền n8n cũng
+  đọc được — rò rỉ credential thật, không phải chuyện nhỏ. Cần gọi AI trong
+  workflow thì luôn hỏi người dùng một API key RIÊNG cho workflow đó (của họ,
+  không phải của Agent), hoặc dùng `genericCredentialType` với credential họ
+  tự tạo trong n8n.
 - **`if` / `filter` / `switch`** — điều kiện dạng
   `{ "options": { "caseSensitive": true, "typeValidation": "strict", "version": 2 },
   "conditions": [{ "leftValue": "={{ $json.x }}", "rightValue": "y",
   "operator": { "type": "string", "operation": "equals" } }], "combinator": "and" }`.
   Đặt vào `parameters.conditions`, riêng `switch` đặt vào
   `parameters.rules.values[N].conditions`.
+- **`gmailTrigger` vs `gmail` (`getAll`) — chọn nhầm node là lỗi hay gặp
+  nhất khi người dùng nói "tìm email"/"lọc email"/"lấy danh sách email".**
+  Hai node này KHÔNG thay thế nhau được:
+  - `gmailTrigger` — khởi động workflow mỗi khi có email MỚI khớp điều
+    kiện (polling nền, không cần ai gọi). Dùng khi yêu cầu là hành động tự
+    động "mỗi khi có mail... thì...".
+  - `gmail`, `resource: "message"`, `operation: "getAll"` — tìm/liệt kê
+    email ĐÃ CÓ SẴN trong hộp thư, chạy một lần khi được gọi (thủ công,
+    theo lịch, hay theo webhook). Dùng khi yêu cầu là tra cứu "tìm email
+    có...", "email nào từ...", "liệt kê email chưa đọc tuần này" — đây mới
+    là node đúng, KHÔNG PHẢI `gmailTrigger`.
+  `getAll` nhận `parameters.filters` (object phẳng, không lồng thêm cấp
+  nào), field thật xác nhận qua schema:
+  `q` (chuỗi, đúng cú pháp ô tìm kiếm Gmail thật, ví dụ `"has:attachment"`,
+  `"from:abc@xyz.com"`, `"subject:hoá đơn"`), `sender` (tên/email người
+  gửi), `readStatus` (`"both"`/`"unread"`/`"read"`), `receivedAfter`/
+  `receivedBefore` (ISO date hoặc timestamp ms), `labelIds` (mảng ID label
+  thật — xem mục bên dưới), `includeSpamTrash` (boolean). Ví dụ:
+  `"parameters": { "resource": "message", "operation": "getAll", "returnAll": false, "limit": 50, "filters": { "q": "from:abc@xyz.com", "readStatus": "unread" } }`.
+  **Lỗi thật đã gặp NGAY CẢ SAU KHI đọc đúng mục này**: model tự bịa
+  `"operation": "search"` và `"criteria": [{"field": "unread", "value": true}, ...]`
+  — cả hai đều KHÔNG TỒN TẠI trong schema thật, nghe hợp lý nhưng hoàn toàn
+  giả. `n8n_validate_workflow` và REST API của n8n đều KHÔNG kiểm tra nội
+  dung `parameters` (chỉ kiểm tra cấu trúc workflow tổng thể) nên workflow
+  vẫn "tạo thành công" nhưng không bao giờ trả ra kết quả gì khi chạy thật —
+  lỗi âm thầm, giống hệt kiểu lỗi `labelIds` ở mục dưới. TRƯỚC KHI viết
+  `parameters` cho bất kỳ operation nào của `gmail` (không riêng `getAll`),
+  BẮT BUỘC gọi `n8n_describe_node("gmail", 2.2, "message", "getAll")` (kèm
+  đúng resource/operation đang cần) xác nhận lại tên field thật — không suy
+  luận, không đoán theo REST API "hợp lý" của dịch vụ khác.
+  `simple: true` (mặc định) chỉ trả metadata gọn — GIỮ NGUYÊN mặc định này
+  trừ khi thật sự cần đọc nội dung email (ví dụ để đưa cho AI tóm tắt/phân
+  loại); đặt `simple: false` để lấy toàn bộ email thô tốn RAM nhiều, dễ gây
+  workflow crash khi số lượng email lớn.
+- **`gmailTrigger` xử lý xong dễ bị lặp lại cùng 1 mail mỗi lần poll** nếu
+  không tự đánh dấu đã xử lý — trigger tự nó không nhớ email nào đã đi qua.
+  Lọc `readStatus: "unread"` không đủ nếu không có bước nào đánh dấu email
+  đã đọc/gắn nhãn sau khi xử lý xong: thêm bước `gmail`, `operation:
+  "markAsRead"` (hoặc `addLabels` với 1 label loại trừ ngay trong `q` của
+  trigger) ở CUỐI workflow, sau bước tạo ra kết quả — đặt trước thì một lần
+  chạy lỗi giữa chừng sẽ đánh dấu đã xử lý mà chưa thực sự tạo ra gì.
+- **`gmail`/`gmailTrigger` — gắn nhãn (label) sai là lỗi hay gặp nhất.**
+  `resource: "message"`, `operation: "addLabels"` cần `labelIds` là **MẢNG ID
+  label thật** (`type: "multiOptions"` trong schema thật — tra bằng
+  `n8n_describe_node("gmail")` để xác nhận lại nếu cần), KHÔNG PHẢI một chuỗi
+  tên tự đặt. Lỗi thật đã gặp: model viết
+  `"labelIds": "={{ $json.labelName }}"` với `labelName` là chuỗi tự sinh kiểu
+  `"Tiếng Việt-Công việc"` — sai type (chuỗi thay vì mảng) VÀ Gmail không hề
+  có label tên như vậy, n8n âm thầm bỏ qua tham số lạ, workflow "chạy thành
+  công" nhưng chẳng label nào được gắn cả.
+  - Label hệ thống có sẵn, dùng thẳng ID (chính là tên viết hoa, không cần
+    tạo): `IMPORTANT`, `STARRED`, `UNREAD`, `SPAM`, `TRASH`, `INBOX`, `SENT`,
+    `DRAFT`.
+  - Label tuỳ ý (do người dùng đặt tên, ví dụ phân loại theo ngôn ngữ/độ ưu
+    tiên) PHẢI lấy ID thật trước: gọi `resource: "label"`,
+    `operation: "getAll"` xem đã tồn tại chưa, chưa có thì
+    `operation: "create"` (`parameters.name`) để n8n tạo và trả về `id` thật
+    — chỉ dùng đúng `id` đó, không bao giờ đưa thẳng tên label vào `labelIds`.
+  - **Label lồng nhau (sub-label)**: Gmail CÓ hỗ trợ, không phải không hỗ trợ
+    như model từng trả lời sai — chỉ cần đặt `name` chứa dấu **gạch chéo
+    `/`**, ví dụ `"Test nhãn/Nhãn con"` tạo ra "Nhãn con" lồng dưới "Test
+    nhãn". Dấu CHẤM `.` không tạo phân cấp gì cả, Gmail hiển thị nguyên
+    văn một label phẳng tên có dấu chấm — đừng dùng dấu chấm rồi bảo người
+    dùng đó là cách phân cấp.
+    **`name` LUÔN LÀ TOÀN BỘ ĐƯỜNG DẪN TỪ GỐC**, không phải chỉ phần tên mới
+    thêm vào. Thêm 1 nhánh con cấp 3 vào cây có sẵn "Test nhãn/Nhãn con" thì
+    `name` phải là `"Test nhãn/Nhãn con/Con của nhãn con"` — viết tắt
+    `"Nhãn con/Con của nhãn con"` (thiếu gốc `"Test nhãn/"`) sẽ khiến Gmail
+    hiểu đây là một cây NHÃN MỚI hoàn toàn, tạo ra một "Nhãn con" thứ hai độc
+    lập ở gốc (trùng tên, khác id, không liên quan gì tới "Test nhãn/Nhãn
+    con" đã có) rồi mới lồng "Con của nhãn con" dưới nó — không nối được vào
+    cây cũ. Trước khi tạo nhánh con, `n8n_describe_node`/`getAll` không tự
+    validate việc này — phải tự ghép đủ path từ gốc bằng tay.
+  - `messageId` (cho `addLabels`/`removeLabels`/`get`) là chuỗi đơn, lấy từ
+    output node trigger: `={{ $json.id }}` nếu dùng ngay node kế tiếp
+    `gmailTrigger`, hoặc `={{ $node["Gmail Trigger"].json["id"] }}` nếu qua
+    nhiều node trung gian — cả hai cách đều đúng cú pháp n8n.
+  - Node cần OAuth2 (Gmail Trigger, hay bất kỳ operation nào của `gmail`)
+    luôn đòi credential thật gắn vào node — xem mục "credential" ngay dưới
+    đây, không giả định workflow tự chạy được nếu thiếu bước này.
 
 Biểu thức n8n viết dạng `"={{ $json.ten_truong }}"` — thiếu dấu `=` mở đầu thì
 n8n hiểu là chuỗi văn bản thường.
+
+## Ví dụ: Gmail → gọi AI tóm tắt/phân loại → gắn nhãn
+
+Bộ khung cho yêu cầu hay gặp nhất ("đọc mail, tóm tắt/phân loại bằng AI, gắn
+nhãn") — dùng lại đúng, đừng viết lại từ đầu mỗi lần:
+
+```json
+{
+  "name": "Gmail AI Summary & Label",
+  "nodes": [
+    { "id": "1", "name": "Gmail Trigger", "type": "n8n-nodes-base.gmailTrigger", "typeVersion": 1.4,
+      "position": [0, 0],
+      "parameters": { "pollTimes": { "item": [{ "mode": "everyMinute" }] },
+        "filters": { "readStatus": "unread" }, "simple": false },
+      "credentials": { "gmailOAuth2": { "id": "<id từ n8n_list_credentials>", "name": "<name từ đó>" } } },
+    { "id": "2", "name": "Goi AI", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2,
+      "position": [220, 0],
+      "parameters": {
+        "method": "POST", "url": "<endpoint AI người dùng cung cấp>",
+        "authentication": "none", "sendHeaders": true, "specifyHeaders": "keypair",
+        "headerParameters": { "parameters": [
+          { "name": "Authorization", "value": "Bearer <API key RIÊNG người dùng cung cấp cho workflow này>" },
+          { "name": "Content-Type", "value": "application/json" } ] },
+        "sendBody": true, "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: \"<model>\", messages: [ { role: \"system\", content: \"Trả lời DUY NHẤT JSON dạng {label, summary}. label chỉ được là một trong: Cong-Viec, Ca-Nhan, Spam.\" }, { role: \"user\", content: $json.subject + \"\\n\" + $json.snippet } ] }) }}" } },
+    { "id": "3", "name": "Doc ket qua AI", "type": "n8n-nodes-base.code", "typeVersion": 2,
+      "position": [440, 0],
+      "parameters": { "jsCode": "const email = $('Gmail Trigger').first().json\nconst ai = JSON.parse($input.first().json.choices[0].message.content)\nreturn [{ json: { messageId: email.id, label: ai.label, summary: ai.summary } }]" } },
+    { "id": "4", "name": "Gan nhan", "type": "n8n-nodes-base.gmail", "typeVersion": 2.2,
+      "position": [660, 0],
+      "parameters": { "resource": "message", "operation": "addLabels",
+        "messageId": "={{ $json.messageId }}",
+        "labelIds": "={{ [$json.label === 'Cong-Viec' ? 'Label_111' : $json.label === 'Spam' ? 'SPAM' : 'Label_222'] }}" },
+      "credentials": { "gmailOAuth2": { "id": "<id từ n8n_list_credentials>", "name": "<name từ đó>" } } }
+  ],
+  "connections": {
+    "Gmail Trigger": { "main": [[{ "node": "Goi AI", "type": "main", "index": 0 }]] },
+    "Goi AI": { "main": [[{ "node": "Doc ket qua AI", "type": "main", "index": 0 }]] },
+    "Doc ket qua AI": { "main": [[{ "node": "Gan nhan", "type": "main", "index": 0 }]] }
+  },
+  "settings": {}
+}
+```
+
+Những chỗ PHẢI thay bằng giá trị thật trước khi upsert, không được để nguyên
+placeholder:
+- `<id từ n8n_list_credentials>`/`<name từ đó>` — gọi `n8n_list_credentials`
+  lấy thật; chưa có thì báo người dùng tạo credential Gmail OAuth2 trước.
+- `<endpoint AI người dùng cung cấp>` và API key trong `Authorization` — hỏi
+  người dùng, KHÔNG dùng key/endpoint của chính Agent (xem mục `httpRequest`
+  ở trên).
+- `Label_111`/`Label_222` trong node "Gan nhan" — đây là ID GIẢ minh hoạ
+  shape đúng (mảng), không phải ID thật. Lấy ID thật bằng
+  `resource: "label", operation: "getAll"` (đã tồn tại) hoặc `"create"`
+  (chưa có) trước khi ghép vào node "Gan nhan" — xem mục `gmail` ở trên. Có
+  thể dùng thẳng label hệ thống (`SPAM`, `IMPORTANT`, ...) mà không cần bước
+  này.
+- Cấu trúc JSON trả về từ node "Goi AI" (`choices[0].message.content`) đúng
+  cho API dạng OpenAI-compatible; endpoint khác có thể trả field khác — đọc
+  `n8n_run_workflow`'s kết quả thật một lần để biết đúng đường dẫn field
+  trước khi tin vào đoạn Code này.
