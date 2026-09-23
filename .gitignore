@@ -9,3 +9,5 @@ out/
 /.dev-state/
 # Real credentials (OPENAI_API_KEY etc., see .env.example) — never commit.
 /.env
+# Saved browser logins and cookie exports — a live signed-in session.
+/secrets/

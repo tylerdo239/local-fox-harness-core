@@ -14,6 +14,7 @@ LLM_OPENAI_COMPAT_DIR="$REPO_ROOT/packages/llm/openai-compat"
 TOOL_SERPER_DIR="$REPO_ROOT/packages/tool/serper-web-search"
 TOOL_N8N_DIR="$REPO_ROOT/packages/tool/n8n"
 TOOL_CREATE_SKILL_DIR="$REPO_ROOT/packages/tool/create-skill"
+TOOL_GMAIL_BROWSER_DIR="$REPO_ROOT/packages/tool/gmail-browser"
 PROFILE_DIR="$DSH_HOME/profiles/cordis-app"
 DSH_BIN="$REPO_ROOT/node_modules/.bin/dsh"
 
@@ -48,7 +49,8 @@ cat > "$PROFILE_DIR/package.json" <<EOF
     "@cordis-app/llm-openai-compat": "link:$LLM_OPENAI_COMPAT_DIR",
     "@cordis-app/tool-serper-web-search": "link:$TOOL_SERPER_DIR",
     "@cordis-app/tool-n8n": "link:$TOOL_N8N_DIR",
-    "@cordis-app/tool-create-skill": "link:$TOOL_CREATE_SKILL_DIR"
+    "@cordis-app/tool-create-skill": "link:$TOOL_CREATE_SKILL_DIR",
+    "@cordis-app/tool-gmail-browser": "link:$TOOL_GMAIL_BROWSER_DIR"
   },
   "dsh": {
     "profile": {
@@ -58,7 +60,8 @@ cat > "$PROFILE_DIR/package.json" <<EOF
         "@cordis-app/bundle-core",
         "@cordis-app/llm-openai-compat",
         "@cordis-app/tool-serper-web-search",
-        "@cordis-app/tool-create-skill"
+        "@cordis-app/tool-create-skill",
+        "@cordis-app/tool-gmail-browser"
       ],
       "patchReload": "startup"
     }
@@ -96,6 +99,7 @@ cd "$REPO_ROOT"
 "$DSH_BIN" plugin --profile cordis-app add "@cordis-app/tool-serper-web-search" >&2
 "$DSH_BIN" plugin --profile cordis-app add "@cordis-app/tool-n8n" >&2
 "$DSH_BIN" plugin --profile cordis-app add "@cordis-app/tool-create-skill" >&2
+"$DSH_BIN" plugin --profile cordis-app add "@cordis-app/tool-gmail-browser" >&2
 "$DSH_BIN" plugin --profile cordis-app install >&2
 
 # dsh's own --host flag hard-rejects 0.0.0.0 ("intentionally not supported

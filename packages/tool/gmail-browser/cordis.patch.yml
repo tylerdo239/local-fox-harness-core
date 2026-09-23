@@ -1,0 +1,6 @@
+# Pure ADD (no such id upstream), same convention as the other tool packages.
+# Every config key has a default matching deploy/docker-compose.yml, so no
+# config block is required to enable it.
+- insert:
+    - id: cordis-tool-gmail-browser
+      name: '@cordis-app/tool-gmail-browser'

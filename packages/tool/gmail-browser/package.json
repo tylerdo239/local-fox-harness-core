@@ -1,0 +1,25 @@
+{
+  "name": "@cordis-app/tool-gmail-browser",
+  "description": "Gmail in a real browser: registers a small set of agent tools that drive the `playwright-mcp` compose service over MCP, with navigation restricted to Gmail. Entirely original to this project.",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "node lib/check.js"
+  },
+  "comment_dependencies": "Deliberately none here beyond the cordis peer — see packages/llm/openai-compat/package.json's own comment_dependencies for the real prior bug this avoids. @modelcontextprotocol/sdk, @deepseek-ai/dsh-tools and the rest are declared once, at the root package.json, and resolve here through the single hoisted root node_modules.",
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "4.0.2"
+  }
+}

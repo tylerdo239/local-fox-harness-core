@@ -52,6 +52,64 @@ services:
       N8N_EDITOR_BASE_URL: "http://127.0.0.1:5678"
     restart: unless-stopped
 
+  # The browser @cordis-app/tool-gmail-browser drives, over MCP. Reached only
+  # by core across the compose network (no published port). Its own tool list
+  # and origin controls are not used: the plugin registers its own 6 tools and
+  # checks URLs itself — see that package's src/index.ts for why.
+  #
+  # Gmail login: open the VNC page below and sign in BY HAND, once, in that
+  # window. The profile lives on the `browser-profile` volume, so the login
+  # survives restarts and Google's own cookie rotation is written back —
+  # unlike the earlier `--isolated` + exported-cookie-file setup, whose
+  # snapshot of a session went stale about an hour after it was taken.
+  # Signing in by hand also sidesteps Google refusing automated sign-in.
+  playwright-mcp:
+    # Upstream Playwright MCP plus a virtual screen and noVNC — see
+    # browser/Dockerfile. Watch the agent work, or sign in to Gmail by hand,
+    # at http://127.0.0.1:6080/vnc.html; from a laptop, open a tunnel first:
+    #   ssh -L 6080:127.0.0.1:6080 <server>
+    build:
+      context: ..
+      dockerfile: deploy/browser/Dockerfile
+    image: cordis-browser:dev
+    init: true
+    command:
+      # Headed on purpose — the window is the point; it lives on the virtual
+      # screen, which costs a few MB over headless.
+      - --browser=chromium
+      - --no-sandbox
+      - --host=0.0.0.0
+      - --port=8931
+      - --allowed-hosts=*        # it is addressed as "playwright-mcp:8931", not localhost
+      - --user-data-dir=/profile # the signed-in Chrome profile, kept on a volume
+      # One profile means one browser: without this, a second client gets
+      # "Browser is already in use for /profile" instead of the same window.
+      - --shared-browser-context
+      - --image-responses=omit   # the model reads text snapshots, never screenshots
+      - --idle-timeout=0         # never close the window: it is watched over VNC
+      # Downloads land here instead of inside the container: core reads the
+      # same volume and copies an attachment into the session's workspace.
+      - --output-dir=/downloads
+      # Sized so the window fills the virtual screen below (Chromium adds its
+      # own tab and address bars on top of the viewport) — otherwise the VNC
+      # view shows a small window on a black field.
+      - --viewport-size=1420x800
+    # Runs as the host user rather than the image's own uid 1000, so anything
+    # this writes on a bind mount belongs to the operator. Override per host:
+    # CORDIS_UID/CORDIS_GID in the repo-root .env.
+    user: "${CORDIS_UID:-1019}:${CORDIS_GID:-1020}"
+    # That uid owns no home inside the image, and HOME=/ is not writable, so
+    # Chromium died on launch ("Target page, context or browser has been
+    # closed") until it was pointed somewhere it may write.
+    environment:
+      HOME: /tmp
+    volumes:
+      - browser-profile:/profile
+      - browser-downloads:/downloads
+    ports:
+      - "127.0.0.1:6080:6080"   # noVNC viewer — loopback only, same posture as core
+    restart: unless-stopped
+
   core:
     image: cordis-core:dev
     build:
@@ -76,6 +134,9 @@ services:
       # restart core` picks it up.
       - ../data/harness:/data/harness
       - workspace:/workspace
+      # Read-only: gmail_download copies what the browser saved into the
+      # session's own workspace, and never writes back.
+      - browser-downloads:/downloads:ro
     ports:
       - "127.0.0.1:3080:3080"   # loopback only — see architecture doc §2.3 for remote access
     # No IPv6 here, declared rather than left implicit. dsh-web-fetch-http probes
@@ -93,5 +154,7 @@ services:
     restart: unless-stopped
 
 volumes:
+  browser-profile:
+  browser-downloads:
   workspace:
   n8n-data:

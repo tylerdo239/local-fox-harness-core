@@ -28,6 +28,7 @@ COPY packages/llm/openai-compat/package.json packages/llm/openai-compat/
 COPY packages/tool/serper-web-search/package.json packages/tool/serper-web-search/
 COPY packages/tool/n8n/package.json packages/tool/n8n/
 COPY packages/tool/create-skill/package.json packages/tool/create-skill/
+COPY packages/tool/gmail-browser/package.json packages/tool/gmail-browser/
 RUN corepack enable && corepack prepare pnpm@11.7.0 --activate \
  && pnpm install --frozen-lockfile
 COPY packages/bundle-core/ packages/bundle-core/
@@ -35,11 +36,13 @@ COPY packages/llm/openai-compat/ packages/llm/openai-compat/
 COPY packages/tool/serper-web-search/ packages/tool/serper-web-search/
 COPY packages/tool/n8n/ packages/tool/n8n/
 COPY packages/tool/create-skill/ packages/tool/create-skill/
+COPY packages/tool/gmail-browser/ packages/tool/gmail-browser/
 COPY packages/skills/ packages/skills/
 RUN pnpm --dir packages/llm/openai-compat run build \
  && pnpm --dir packages/tool/serper-web-search run build \
  && pnpm --dir packages/tool/n8n run build \
  && pnpm --dir packages/tool/create-skill run build \
+ && pnpm --dir packages/tool/gmail-browser run build \
  && pnpm --dir packages/bundle-core run build
 
 FROM node:22-bookworm-slim AS runtime
@@ -48,6 +51,10 @@ WORKDIR /app
 # start, not just build time. socat: entrypoint.sh's 0.0.0.0-reachable proxy
 # in front of dsh's own loopback-only listener (see entrypoint.sh for why —
 # confirmed necessary against a real Docker Desktop run, not a guess).
+#
+# poppler-utils is `pdftotext`, the one thing missing to read an email
+# attachment the agent just saved into a workspace (gmail_download). A .docx
+# needs nothing extra — it is a zip, and python3's stdlib opens it.
 #
 # python3 + numpy + pandas because the image had no interpreter at all: asked
 # to count the primes under 100000, the agent called `python3` (not found),
@@ -58,6 +65,7 @@ WORKDIR /app
 RUN npm install --global pnpm@11.7.0 && npm cache clean --force \
  && apt-get update && apt-get install --no-install-recommends -y \
       socat python3 python3-numpy python3-pandas \
+      poppler-utils \
  && rm -rf /var/lib/apt/lists/*
 COPY --from=core-builder /app /app
 COPY --from=web-builder /web/out /app/apps/web/out
