@@ -27,6 +27,8 @@
 //   (`workflow:publish`) were rejected with "Invalid scopes for user role".
 import { randomUUID, timingSafeEqual } from 'node:crypto'
 import { readFileSync } from 'node:fs'
+import { mkdir } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -35,7 +37,10 @@ import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { JsonValue } from '@deepseek-ai/dsh-util-values'
-import type { ContentBlock } from '@deepseek-ai/dsh-llm'
+import { createUserMessage, type ContentBlock } from '@deepseek-ai/dsh-llm'
+import { SessionId, type Session, type SessionEvent } from '@deepseek-ai/dsh-session'
+import type {} from '@deepseek-ai/dsh-agent'
+import type {} from '@deepseek-ai/dsh-agent-default-model'
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
 import { WebhookDeliveryId, WebhookRuleId, WebhookSourceId, type VerifiedWebhookDelivery } from '@deepseek-ai/dsh-webhook'
 import type {} from '@deepseek-ai/dsh-tools'
@@ -50,7 +55,8 @@ export const name = 'cordis-n8n'
 // dashboard polls — separate from the agent-facing n8n_* tools above, same
 // static-path GET/POST convention as gateway.ts (see that file's own header
 // comment for why: ctx.connection.fetch.register() keys by exact pathname).
-export const inject = ['tools', 'credentials', 'webServer', 'webhookRuntime', 'approval', 'connection', 'systemPrompt']
+// 'agents' + 'agentDefaultModel' back the synchronous agent-run route below.
+export const inject = ['tools', 'credentials', 'webServer', 'webhookRuntime', 'approval', 'connection', 'systemPrompt', 'agents', 'agentDefaultModel']
 
 // In the system prompt rather than the n8n skill: measured, a question like
 // "any recent errors in workflow X?" often skips loading the skill, and then
@@ -80,6 +86,7 @@ export interface Config {
   readonly editorBaseURL?: string
   readonly apiKeyEnv: string
   readonly webhookPath: string
+  readonly agentRunPath: string
   readonly webhookSecretEnv: string
   readonly webhookSource: string
   readonly maxBodyBytes: number
@@ -96,6 +103,7 @@ export const Config: z<Config> = z.object({
   editorBaseURL: z.string(),
   apiKeyEnv: z.string().role('credential-ref').default('N8N_API_KEY'),
   webhookPath: z.string().default('/api/v1/hooks/n8n'),
+  agentRunPath: z.string().default('/api/v1/agent-run'),
   webhookSecretEnv: z.string().role('credential-ref').default('N8N_WEBHOOK_SECRET'),
   webhookSource: z.string().default('primary-n8n'),
   maxBodyBytes: z.number().step(1).min(1).default(1_048_576),
@@ -619,36 +627,41 @@ async function readBoundedBody(req: IncomingMessage, maxBytes: number): Promise<
   return Buffer.concat(chunks).toString('utf8')
 }
 
+/** The shared front door of both n8n → core routes: POST, JSON, the n8n webhook secret, a bounded top-level JSON object. */
+async function readTrustedJson(ctx: Context, config: Config, req: IncomingMessage, res: ServerResponse): Promise<Record<string, unknown>> {
+  if (req.method !== 'POST') {
+    res.setHeader('allow', 'POST')
+    throw new WebhookHttpError(405, 'method not allowed')
+  }
+  if (!(req.headers['content-type'] ?? '').startsWith('application/json')) {
+    throw new WebhookHttpError(415, 'content type must be application/json')
+  }
+  const provided = req.headers['x-n8n-webhook-secret']
+  if (typeof provided !== 'string' || provided === '') {
+    throw new WebhookHttpError(401, 'missing x-n8n-webhook-secret header')
+  }
+  const credential = await ctx.credentials.resolve(credentialRef(config.webhookSecretEnv))
+  if (credential === undefined || credential.value === '') {
+    throw new WebhookHttpError(503, 'n8n webhook secret is unavailable')
+  }
+  if (!safeCompare(provided, credential.value)) throw new WebhookHttpError(401, 'invalid webhook secret')
+  const body = await readBoundedBody(req, config.maxBodyBytes)
+  let payload: unknown
+  try {
+    payload = JSON.parse(body)
+  } catch {
+    throw new WebhookHttpError(400, 'invalid JSON body')
+  }
+  if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) {
+    throw new WebhookHttpError(400, 'body must be a top-level JSON object')
+  }
+  return payload as Record<string, unknown>
+}
+
 function createN8nWebhookHandler(ctx: Context, config: Config) {
-  const secretRef = credentialRef(config.webhookSecretEnv)
   return async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
     try {
-      if (req.method !== 'POST') {
-        res.setHeader('allow', 'POST')
-        throw new WebhookHttpError(405, 'method not allowed')
-      }
-      if (!(req.headers['content-type'] ?? '').startsWith('application/json')) {
-        throw new WebhookHttpError(415, 'content type must be application/json')
-      }
-      const provided = req.headers['x-n8n-webhook-secret']
-      if (typeof provided !== 'string' || provided === '') {
-        throw new WebhookHttpError(401, 'missing x-n8n-webhook-secret header')
-      }
-      const credential = await ctx.credentials.resolve(secretRef)
-      if (credential === undefined || credential.value === '') {
-        throw new WebhookHttpError(503, 'n8n webhook secret is unavailable')
-      }
-      if (!safeCompare(provided, credential.value)) throw new WebhookHttpError(401, 'invalid webhook secret')
-      const body = await readBoundedBody(req, config.maxBodyBytes)
-      let payload: unknown
-      try {
-        payload = JSON.parse(body)
-      } catch {
-        throw new WebhookHttpError(400, 'invalid JSON body')
-      }
-      if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) {
-        throw new WebhookHttpError(400, 'body must be a top-level JSON object')
-      }
+      const payload = await readTrustedJson(ctx, config, req, res)
       const delivery: VerifiedWebhookDelivery<'n8n'> = {
         kind: 'n8n',
         source: WebhookSourceId(config.webhookSource),
@@ -677,6 +690,68 @@ function createN8nWebhookHandler(ctx: Context, config: Config) {
       ctx.logger.warn('cordis-n8n: webhook request failed', error)
       res.writeHead(503)
       res.end('webhook ingress is unavailable')
+    }
+  }
+}
+
+// n8n → agent, synchronously. The webhook ingress above answers 202 and leaves
+// the answer inside a session; an n8n HTTP Request node calling THIS gets the
+// agent's final message back as its own output, so the next node can use it.
+// The prompt is the task itself, not untrusted context: whoever holds the
+// webhook secret is as trusted as a user typing in chat.
+const AGENT_RUN_TIMEOUT_MS = 10 * 60_000
+// Nobody is watching a run started by n8n, so a model that stops to ask "shall
+// I send it?" would strand the caller with a question instead of a result —
+// the Gmail tools' own prompt section tells it to act when a task says this.
+const AUTOMATION_NOTE = 'Automated request from n8n — nobody is available to answer questions, so carry the task out and report the result.'
+
+async function runAgent(ctx: Context, prompt: string): Promise<{ sessionId: string; finish: string; answer: string }> {
+  const cwd = join(process.env.CORDIS_WORKSPACE_ROOT ?? tmpdir(), randomUUID())
+  await mkdir(cwd, { recursive: true })
+  const { agent } = await ctx.agents.create({
+    sessionId: SessionId(randomUUID()),
+    meta: { cwd },
+    agentOptions: ctx.agentDefaultModel.currentSelection(),
+  })
+  return new Promise((resolve) => {
+    let answer = ''
+    // cancel() ends the turn, and the turn/end it produces resolves this.
+    const timer = setTimeout(() => agent.cancel({ kind: 'user' }), AGENT_RUN_TIMEOUT_MS)
+    const dispose = ctx.on('session/event', (session: Session, event: SessionEvent) => {
+      if (session.id !== agent.session.id) return
+      if (event.type === 'assistant/message') {
+        const text = event.data.message.content.flatMap(part => part.type === 'text' ? [part.text] : []).join('').trim()
+        if (text !== '') answer = text
+      } else if (event.type === 'turn/end') {
+        clearTimeout(timer)
+        dispose()
+        resolve({ sessionId: agent.session.id, finish: event.data.reason.kind, answer })
+      }
+    }, { global: true })
+    agent.followup(createUserMessage({
+      content: [{ type: 'text', text: `${AUTOMATION_NOTE}\n\n${prompt}` }],
+      source: { kind: 'user' },
+    }))
+  })
+}
+
+function createAgentRunHandler(ctx: Context, config: Config) {
+  return async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
+    const reply = (status: number, body: unknown): void => {
+      res.writeHead(status, { 'content-type': 'application/json' })
+      res.end(JSON.stringify(body))
+    }
+    try {
+      const body = await readTrustedJson(ctx, config, req, res)
+      if (typeof body.prompt !== 'string' || body.prompt.trim() === '') throw new WebhookHttpError(400, 'missing string field "prompt"')
+      const result = await runAgent(ctx, body.prompt)
+      // Cancelled (the timeout ran out) or failed: hand back whatever was said
+      // anyway, so n8n's error branch has something to show.
+      reply(result.finish === 'completed' ? 200 : 502, result)
+    } catch (error) {
+      if (error instanceof WebhookHttpError) return reply(error.status, { error: error.message })
+      ctx.logger.warn('cordis-n8n: agent-run failed', error)
+      reply(503, { error: 'agent run failed to start' })
     }
   }
 }
@@ -759,6 +834,12 @@ export function apply(ctx: Context, config: Config): void {
     path: config.webhookPath,
     handler: createN8nWebhookHandler(ctx, config),
   }), `cordis-n8n: webhook ingress at ${config.webhookPath}`)
+
+  ctx.effect(() => ctx.webServer.register({
+    kind: 'exact',
+    path: config.agentRunPath,
+    handler: createAgentRunHandler(ctx, config),
+  }), `cordis-n8n: agent-run at ${config.agentRunPath}`)
 
   ctx.effect(() => ctx.webhookRuntime.register({
     id: WebhookRuleId('n8n-workflow-routes'),
