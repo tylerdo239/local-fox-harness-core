@@ -133,7 +133,13 @@ function AppFrame() {
   // don't spawn a second empty conversation either), not a fresh backend
   // session every click.
   const hasChatted = sessionId === undefined || hasRealUserMessage(events)
-  const newSessionDisabled = !hasChatted
+  // ...except on /automations, where that empty draft is not on screen at all
+  // (the center column shows the dashboard instead): the button then looked
+  // broken — greyed out for a reason the user could not see, reported as
+  // "can't click New chat on the Automation tab". There it stays enabled and
+  // simply navigates home to that same invisible draft; the click handler is
+  // what avoids creating a second one.
+  const newSessionDisabled = route.kind !== 'automations' && !hasChatted
 
   function startNew(): void {
     if (newSessionDisabled) return
@@ -238,7 +244,10 @@ function AppFrame() {
           // no-op when already home: pushing `/` again on top of `/` would
           // just be a redundant history entry.
           if (route.kind !== 'home') goHome()
-          startNew()
+          // An empty draft already exists (the /automations case above):
+          // going home reveals it, and starting another would leave a second
+          // empty session behind.
+          if (hasChatted) startNew()
         }}
         newSessionDisabled={newSessionDisabled}
         activeSessionId={sessionId}
