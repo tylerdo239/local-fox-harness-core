@@ -419,6 +419,19 @@ export function apply(ctx: Context): void {
   // changes the model of ONE already-live (or cold, auto-resumed) session,
   // taking effect from its next step (ctx.sessionController's own contract:
   // "Select one Session-local model after explicitly resuming the Session").
+  //
+  // Real, confirmed-in-source behavior found live (2026-09-23), NOT
+  // documented in that "Session-local" contract:
+  // dsh-api-session-controller's compiled selectModel()
+  // (lib/types/commands.js) ALWAYS also calls
+  // `ctx.agentDefaultModel.saveSelection(selected)` internally — every call
+  // silently overwrites the DEPLOYMENT-WIDE default too, confirmed with a
+  // controlled test (select a model for session A, GET /api/v1/model showed
+  // it as the default even for a brand-new, never-touched session B).
+  // apps/web's ModelPicker tells the user this only affects THIS
+  // conversation (model-picker.tsx's own `modelPicker.scopeHint` string) —
+  // snapshotting the default here and restoring it right after the call is
+  // what actually makes that claim true, not just documentation.
   registerRoute(ctx, '/session-select-model', {
     POST: async (request) => {
       const body = await readJson(request)
@@ -432,12 +445,14 @@ export function apply(ctx: Context): void {
       if (agent === undefined) return notFoundResponse(`session ${sessionId} not found`)
       const reasoningEffort = requireString(body, 'reasoningEffort')
       try {
+        const previousDefault = ctx.agentDefaultModel.currentSelection()
         const result = await ctx.sessionController.selectModel({
           sessionId: SessionId(sessionId),
           provider,
           model,
           ...reasoningEffort === undefined ? {} : { reasoningEffort: ReasoningEffortId(reasoningEffort) },
         })
+        await ctx.agentDefaultModel.saveSelection(previousDefault)
         return json(result)
       } catch (error) {
         return badRequest(error instanceof Error ? error.message : String(error))

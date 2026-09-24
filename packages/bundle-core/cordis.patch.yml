@@ -425,3 +425,10 @@
       name: '@cordis-app/bundle-core/resilience'
     - id: cordis-web-clean
       name: '@cordis-app/bundle-core/web-clean'
+    # User request (2026-09-23): once OPENROUTER_API_KEY is configured, n8n
+    # work should prefer OpenRouter's Claude Sonnet 5 over this deployment's
+    # own default model — see skill-model-preference.ts's own header for the
+    # full rationale (trigger, sticky-not-reversible choice, silent no-op
+    # when unconfigured).
+    - id: cordis-skill-model-preference
+      name: '@cordis-app/bundle-core/skill-model-preference'

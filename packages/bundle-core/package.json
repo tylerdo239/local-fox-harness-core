@@ -14,6 +14,7 @@
     "./prompt": "./lib/prompt.js",
     "./resilience": "./lib/resilience.js",
     "./web-clean": "./lib/web-clean.js",
+    "./skill-model-preference": "./lib/skill-model-preference.js",
     "./package.json": "./package.json"
   },
   "dsh": {
