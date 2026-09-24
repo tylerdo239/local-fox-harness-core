@@ -7,17 +7,18 @@
 // user request, not an oversight; see that file's own comment on the
 // OPENROUTER_API_KEY field for the other half of this change.
 //
-// User request (2026-09-22): only 2 entries in the dropdown, not the full
-// live provider roster ctx.sessionController.modelCatalog() can return
-// (DeepSeek, any other configured route, ...) — "self-hosted (default)"
-// (the operator-configured default this deployment already talks to,
-// unpickable-elsewhere-but-shown-here) and OpenRouter's full catalog.
-// Built by filtering the real catalog response, not a second backend route:
-// the self-hosted entry is synthesized from `catalog.default` (openai-compat
+// User request (2026-09-22, extended 2026-09-24): a curated subset of the
+// dropdown, not the full live provider roster
+// ctx.sessionController.modelCatalog() can return (DeepSeek, any other
+// configured route, ...) — "self-hosted (default)" (the operator-configured
+// default this deployment already talks to, unpickable-elsewhere-but-shown-
+// here) plus each EXTRA_PROVIDERS entry's own real catalog (openrouter, zai
+// — see that const's own comment for display order). Built by filtering the
+// real catalog response, not a second backend route: gateway.ts's
+// /model-catalog always prepends a fixed self-hosted entry (openai-compat
 // has no queryable model list of its own — confirmed for real, it never
-// appears in `groups` at all, only as `default` — so there is nothing to
-// filter FOR it, only to construct), and every group other than `openrouter`
-// is dropped.
+// appears in `groups` on its own), every other group not named in
+// EXTRA_PROVIDERS is dropped.
 //
 // Deliberately does NOT add a session-id-keyed field to store.ts for "current
 // model": the `request/context` session event already carries {provider,
@@ -34,12 +35,22 @@ import { getModelCatalog, listCredentials, selectSessionModel, type SessionEvent
 import { useChatStore } from '../../../lib/store'
 import { useLocale } from '../../../lib/i18n/locale'
 
-const OPENROUTER_PROVIDER = 'openrouter'
-const OPENROUTER_CREDENTIAL_REF = 'OPENROUTER_API_KEY'
 // Matches gateway.ts's own SELF_HOSTED_PROVIDER — the id /model-catalog
 // always prepends its self-hosted entry under, independent of the mutable
 // `default` field. See groups-building comment below for the bug this fixes.
 const SELF_HOSTED_PROVIDER = 'openai-compat'
+
+// Extra (user-configured) provider routes shown in the picker, keyed by the
+// credential ref that must be `configured` before a click actually switches
+// — order here is DISPLAY order (zai, then openrouter), not just a lookup
+// table. User request (2026-09-24): zai must render as its own section,
+// listed above openrouter — it had been silently dropped entirely (this map
+// used to hold only openrouter, so the earlier `.filter()` below excluded
+// every zai group the backend catalog already returned).
+const EXTRA_PROVIDERS: ReadonlyArray<{ readonly id: string; readonly credentialRef: string }> = [
+  { id: 'zai', credentialRef: 'ZAI_API_KEY' },
+  { id: 'openrouter', credentialRef: 'OPENROUTER_API_KEY' },
+]
 
 interface ModelSelection {
   readonly provider: string
@@ -103,29 +114,39 @@ export function ModelPicker({ sessionId, disabled = false }: { sessionId: string
   })
 
   const current = optimistic ?? latestModelFromEvents(events) ?? catalog.data?.default
-  const openrouterConfigured = credentials.data?.credentials.some(
-    credential => credential.ref === OPENROUTER_CREDENTIAL_REF && credential.configured,
-  ) === true
 
-  // Exactly 2 entries, never the full live provider roster
-  // modelCatalog() can return (DeepSeek, any other configured route, ...) —
-  // see file header comment for why. Real bug found live (2026-09-22):
-  // building the self-hosted entry from `catalog.default` (the MUTABLE
-  // deployment default — changeable via POST /model or a session-local
-  // select) collided with the real openrouter group whenever `default` had
-  // drifted to point at openrouter itself (same id on both, React silently
-  // dropped one). gateway.ts's /model-catalog now always prepends a fixed
-  // SELF_HOSTED_PROVIDER entry sourced from OPENAI_MODEL_ID, independent of
-  // whatever `default` currently is — this just filters + orders it, no
-  // longer builds it.
+  function isConfigured(providerId: string): boolean {
+    const extra = EXTRA_PROVIDERS.find(entry => entry.id === providerId)
+    if (extra === undefined) return true // self-hosted (or anything else with no known credential ref) — nothing to gate
+    return credentials.data?.credentials.some(
+      credential => credential.ref === extra.credentialRef && credential.configured,
+    ) === true
+  }
+
+  // Only self-hosted + the EXTRA_PROVIDERS entries, never the full live
+  // provider roster modelCatalog() can return (DeepSeek, any other
+  // configured route, ...) — see file header comment for why. Real bug
+  // found live (2026-09-22): building the self-hosted entry from
+  // `catalog.default` (the MUTABLE deployment default — changeable via
+  // POST /model or a session-local select) collided with the real
+  // openrouter group whenever `default` had drifted to point at openrouter
+  // itself (same id on both, React silently dropped one). gateway.ts's
+  // /model-catalog now always prepends a fixed SELF_HOSTED_PROVIDER entry
+  // sourced from OPENAI_MODEL_ID, independent of whatever `default`
+  // currently is — this just filters + orders it, no longer builds it.
+  // Order follows EXTRA_PROVIDERS's own array order (zai before openrouter),
+  // not alphabetical or catalog order — a second real bug found live
+  // (2026-09-24): zai was entirely absent from the dropdown because this
+  // filter's allow-list used to name only openrouter.
+  const extraRank = new Map(EXTRA_PROVIDERS.map((entry, index) => [entry.id, index + 1]))
   const groups = (catalog.data?.groups ?? [])
-    .filter(group => group.id === SELF_HOSTED_PROVIDER || group.id === OPENROUTER_PROVIDER)
+    .filter(group => group.id === SELF_HOSTED_PROVIDER || extraRank.has(group.id))
     .map(group => group.id === SELF_HOSTED_PROVIDER ? { ...group, name: t('modelPicker.selfHostedGroupLabel') } : group)
-    .sort((a, b) => (a.id === SELF_HOSTED_PROVIDER ? -1 : b.id === SELF_HOSTED_PROVIDER ? 1 : 0))
+    .sort((a, b) => (a.id === SELF_HOSTED_PROVIDER ? 0 : extraRank.get(a.id)!) - (b.id === SELF_HOSTED_PROVIDER ? 0 : extraRank.get(b.id)!))
 
   function handlePick(groupId: string, modelId: string): void {
-    if (groupId === OPENROUTER_PROVIDER && !openrouterConfigured) {
-      pushToast(t('modelPicker.openrouterNotConfiguredToast'))
+    if (groupId !== SELF_HOSTED_PROVIDER && !isConfigured(groupId)) {
+      pushToast(t('modelPicker.providerNotConfiguredToast', { provider: groupId }))
       requestOpenSettings('config')
       setOpen(false)
       return

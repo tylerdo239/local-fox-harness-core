@@ -23,6 +23,24 @@ built and how it was verified.
 pnpm run setup   # = pnpm install && pnpm run build
 ```
 
+## Two entry points, two audiences — not redundant
+
+This repo has two separate "start the app" scripts on purpose, not by
+accident:
+
+| | `scripts/dev.sh` (`pnpm run dev`) | `scripts/start.sh` |
+|---|---|---|
+| For | **You**, editing code | An end user self-hosting this, never touching source |
+| Runtime | Bare Node/pnpm on your machine | Docker (mandatory — pins the exact Node/pnpm/OS this app needs) |
+| Boots | `core` only, on `:3080` | All 3 compose services — `core`, `n8n`, `playwright-mcp` (the Gmail browser) |
+| Full docs | This file (below) | `docs/getting-started.md` |
+
+Both run the same `deploy/entrypoint.sh`, just parameterized differently —
+neither is legacy or superseded by the other. If you're iterating on
+`packages/`/`apps/web`, use `pnpm run dev`. If you're handing this to
+someone who just wants it running, point them at `./scripts/start.sh` and
+`docs/getting-started.md`, not this file.
+
 ## Run it locally (no Docker)
 
 ```sh
@@ -51,10 +69,15 @@ once never conflicts) between restarts.
 ### Set a model credential
 
 No model call works until `OPENAI_API_KEY` (and ideally `OPENAI_MODEL_ID`) is
-set — this app's own UI has no settings screen for these two (only
-Serper/n8n credentials go through **Settings → Config**; the default
+set — this app's own UI has no settings screen for these two (the default
 `@deepseek-ai/dsh-client-ui-settings-models` screen is disabled, see
-`packages/bundle-core/cordis.patch.yml`'s header comment). Easiest path:
+`packages/bundle-core/cordis.patch.yml`'s header comment); everything else
+(Serper, n8n, **OpenRouter, Z.ai**) goes through **Settings → Config**
+instead, no restart needed. OpenRouter/Z.ai are extra, user-picked model
+routes on top of the fixed `OPENAI_*` default — see
+`docs/add-openrouter-llm-plan.md` for how that's wired and
+`apps/web/components/features/conversation/model-picker.tsx` for the
+in-chat picker that switches to them per-conversation. Easiest path:
 just run `pnpm run dev` (or `./scripts/dev.sh` directly) — on a fresh
 checkout with no `.env` yet, it asks for both interactively on first run and
 writes `.env` for you, so setup is still a single command. See
@@ -95,28 +118,53 @@ first boot, doesn't).
 ## Run it in Docker
 
 ```sh
-docker compose -f deploy/docker-compose.yml up --build
+./scripts/start.sh
 ```
 
-Same boot script (`deploy/entrypoint.sh`) as local dev, parameterized for a
-container instead: binds loopback-only inside the container and bridges to
-the published port via `socat` (Docker Desktop doesn't forward a published
-port to a container-loopback-only listener — see the comment in
-`entrypoint.sh` for the real failure this works around). State lives in
-`data/harness` (bind mount, edit `data/harness/profiles/cordis-app/
-cordis.patch.yml` from the host + `docker compose restart core` to change
-composition without rebuilding — see `docs/patch-cookbook.md`).
+The full walkthrough (first-run `.env` wizard, login, troubleshooting) lives
+in `docs/getting-started.md` — written for the end user, not a developer,
+but accurate for anyone running this via Docker. The short version: it runs
+`docker compose -f deploy/docker-compose.yml up --build -d`, same boot
+script (`deploy/entrypoint.sh`) as local dev, parameterized for a container
+instead — binds loopback-only inside the container and bridges to the
+published port via `socat` (Docker Desktop doesn't forward a published port
+to a container-loopback-only listener — see the comment in `entrypoint.sh`
+for the real failure this works around). State lives in `data/harness`
+(bind mount, edit `data/harness/profiles/cordis-app/cordis.patch.yml` from
+the host + `docker compose restart core` to change composition without
+rebuilding — see `docs/patch-cookbook.md`).
+
+**A bare `docker compose up` builds and starts all 3 services, not just
+`core`** — `n8n` (a real n8n instance, opt-in to actually wire into chat, see
+`docs/patch-cookbook.md`'s Ví dụ 4) and `playwright-mcp` (a headed Chromium
++ noVNC container the `gmail_*` tools drive — its own `deploy/browser/
+Dockerfile`, a real extra build, not free). Gmail needs a **one-time manual
+Google sign-in**: open `http://127.0.0.1:6080/vnc.html` and log in by hand
+in that window — the session persists on the `browser-profile` volume across
+restarts. Neither service blocks `core` from booting or working if you never
+touch them (`packages/tool/gmail-browser/src/index.ts` connects lazily and
+logs a harmless "browser not ready yet" if `playwright-mcp` isn't up); if
+you only want `core`, run `docker compose -f deploy/docker-compose.yml up
+--build -d core` explicitly instead of `./scripts/start.sh`.
 
 ## Project layout
 
 ```
-packages/bundle-core/            # our own app bundle — ui, auth, gateway, n8n, audit (1 file per concern)
+packages/bundle-core/            # our own app bundle — ui, auth, gateway, audit, model-preference (1 file per concern)
 packages/llm/openai-compat/      # generic OpenAI-compatible LlmAdapter (own package, own cordis.patch.yml)
+                                  # OpenRouter/Z.ai reuse @deepseek-ai/dsh-llm-pi-ai instead — a patch row in
+                                  # bundle-core/cordis.patch.yml, no package of our own needed for either
 packages/tool/serper-web-search/ # Serper.dev search source for dsh-tool-web (own package)
+packages/tool/n8n/               # n8n_* tools + inbound webhook route (own package, opt-in — see patch-cookbook.md)
+packages/tool/create-skill/      # lets the model save a new skill from chat (own package)
+packages/tool/gmail-browser/     # gmail_* tools driving playwright-mcp over MCP (own package, on by default)
 apps/web/                        # Next.js static-export chat UI, served by cordis-ui
-deploy/                          # entrypoint.sh (shared by local dev and Docker), Dockerfile, compose
-docs/                            # architecture doc, implementation plan, patch cookbook, UI clone plan, getting-started, upgrading
-scripts/dev.sh                   # local (non-Docker) dev runner — see "Run it locally" above
+deploy/                          # entrypoint.sh (shared by local dev and Docker), Dockerfile(s), compose,
+                                  # deploy/browser/ (the playwright-mcp image gmail-browser drives)
+docs/                            # architecture doc, implementation plan, patch cookbook, UI clone plan,
+                                  # getting-started (end-user Docker path), upgrading, add-openrouter-*-plan
+scripts/dev.sh                   # local (non-Docker) DEVELOPER runner — see "Two entry points" above;
+                                  # scripts/start.sh is the separate end-user Docker entry point
 ```
 
 `packages/bundle-core` stays one package with one file per concern — there's

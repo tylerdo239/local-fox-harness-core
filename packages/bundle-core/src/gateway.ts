@@ -77,7 +77,7 @@ export const inject = ['connection', 'agents', 'sessions', 'sessionQuery', 'agen
 // already settable via this same POST route, just missing from GET's own
 // allow-list before now, so the UI's "configured?" status never showed.
 const KNOWN_CREDENTIAL_REFS = [
-  'DEEPSEEK_API_KEY', 'OPENAI_API_KEY', 'OPENAI_BASE_URL', 'ANTHROPIC_API_KEY', 'OPENROUTER_API_KEY', 'SERPER_API_KEY',
+  'DEEPSEEK_API_KEY', 'OPENAI_API_KEY', 'OPENAI_BASE_URL', 'ANTHROPIC_API_KEY', 'OPENROUTER_API_KEY', 'ZAI_API_KEY', 'SERPER_API_KEY',
   'N8N_API_KEY', 'N8N_WEBHOOK_SECRET',
 ] as const
 

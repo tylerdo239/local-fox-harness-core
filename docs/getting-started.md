@@ -85,9 +85,15 @@ tương ứng. Cách dễ nhất: mở app lên, vào **Settings → Config**, d
 | Credential | Dùng cho | Nơi cấu hình |
 |---|---|---|
 | `SERPER_API_KEY` | Tool tìm kiếm web (`web_search`) | Settings → Config, hoặc biến `.env` cùng tên |
+| `OPENROUTER_API_KEY` | Chọn model OpenRouter (Claude, GPT, Llama...) ngay trong khung chat — nút cạnh nút Gửi, không đổi model mặc định của cả hệ thống | Settings → Config, hoặc biến `.env` cùng tên |
+| `ZAI_API_KEY` | Chọn model Z.ai (GLM, ví dụ `glm-5.3`, context 1M) ngay trong khung chat, cùng chỗ với OpenRouter | Settings → Config, hoặc biến `.env` cùng tên |
 | `N8N_API_KEY` | Tool tạo/sửa workflow n8n (opt-in, xem mục 6) | Settings → Config, hoặc biến `.env` cùng tên |
 | `N8N_WEBHOOK_SECRET` | Xác thực webhook từ n8n gọi ngược vào app | Settings → Config, hoặc biến `.env` cùng tên |
 | `ADMIN_PASSWORD` | Mật khẩu đăng nhập app (mặc định `12345678`) | Settings, hoặc biến `.env` cùng tên |
+
+Chưa cấu hình `OPENROUTER_API_KEY`/`ZAI_API_KEY` thì bấm chọn model tương ứng
+trong khung chat sẽ hiện thông báo lỗi (toast) và tự mở Settings để bạn điền —
+không cần tự đi tìm chỗ cấu hình.
 
 > **Lưu ý quan trọng:** nếu 1 credential đã được set qua biến môi trường thật (`.env`), nó sẽ
 > **luôn thắng** giá trị lưu qua UI (biến môi trường có độ ưu tiên cao nhất) — form trong Settings
@@ -116,12 +122,36 @@ Tích hợp n8n (tạo/sửa/chạy workflow từ chat) **mặc định KHÔNG b
 công 1 lần (thêm 1 đoạn vào `data/harness/profiles/cordis-app/cordis.patch.yml`). Xem hướng dẫn
 đầy đủ, kèm ví dụ thật, tại `docs/patch-cookbook.md` → "Ví dụ 4 — Bật tích hợp n8n".
 
-## 7. Cập nhật lên bản mới
+## 7. Tính năng có sẵn mặc định — Gmail qua trình duyệt thật
+
+Khác n8n (phải bật thủ công), **tool Gmail (`gmail_list`, `gmail_read`, `gmail_send`...) đã bật
+sẵn ngay từ lần chạy `./scripts/start.sh` đầu tiên** — không cần sửa `cordis.patch.yml`. Cơ chế:
+app điều khiển 1 trình duyệt Chrome thật (chạy trong container `playwright-mcp`) đã đăng nhập sẵn
+tài khoản Gmail của bạn.
+
+**Bắt buộc phải làm 1 lần**: đăng nhập Google bằng tay qua giao diện VNC:
+
+1. Mở `http://127.0.0.1:6080/vnc.html` trên trình duyệt.
+2. Đăng nhập Gmail như bình thường trong cửa sổ đó.
+3. Xong — phiên đăng nhập được lưu lại (volume `browser-profile`), sống sót qua mọi lần restart
+   sau này, không cần đăng nhập lại trừ khi Google tự đăng xuất.
+
+**Chưa đăng nhập thì sao?** App vẫn khởi động và chat bình thường — tool Gmail chỉ báo lỗi "browser
+service unreachable"/"browser not ready" khi thực sự được gọi, không chặn gì khác. Không dùng tính
+năng Gmail thì bỏ qua bước này hoàn toàn cũng không sao.
+
+**Chạy máy chủ từ xa (VPS)?** Đừng mở port 6080 ra ngoài — dùng SSH tunnel:
+```sh
+ssh -L 6080:127.0.0.1:6080 <user>@<server>
+```
+rồi mở `http://127.0.0.1:6080/vnc.html` như bình thường trên máy của bạn.
+
+## 8. Cập nhật lên bản mới
 
 `git pull` rồi chạy lại `./scripts/start.sh` — dữ liệu (session, credential đã lưu, workflow
 n8n...) không bị mất, xem chi tiết + checklist backup tại `docs/upgrading.md`.
 
-## 8. Xử lý lỗi thường gặp
+## 9. Xử lý lỗi thường gặp
 
 | Triệu chứng | Nguyên nhân thường gặp |
 |---|---|
@@ -131,3 +161,4 @@ n8n...) không bị mất, xem chi tiết + checklist backup tại `docs/upgradi
 | Sửa `.env` xong nhưng không có tác dụng | Cần chạy lại `./scripts/start.sh` (hoặc `docker compose -f deploy/docker-compose.yml restart core`) — `.env` chỉ được đọc lúc khởi động |
 | Muốn đổi credential qua Settings nhưng lưu không được | Credential đó đang bị 1 biến môi trường thật trong `.env` ghi đè — xem lưu ý ở mục 3 |
 | Vào `http://127.0.0.1:3080` không được | Kiểm tra `docker compose -f deploy/docker-compose.yml ps` xem container `core` có đang chạy không; xem log bằng `docker compose -f deploy/docker-compose.yml logs core` |
+| Gọi tool Gmail báo "browser service unreachable"/"browser not ready" | Chưa đăng nhập Google qua VNC (xem mục 7), hoặc container `playwright-mcp` chưa chạy — kiểm tra `docker compose -f deploy/docker-compose.yml ps` |

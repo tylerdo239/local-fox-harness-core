@@ -405,6 +405,19 @@
     providers:
       openrouter:
         apiKeyEnv: OPENROUTER_API_KEY
+      # Real installed catalog provider (node_modules/@earendil-works/pi-ai/
+      # dist/providers/zai.js — checked before adding, not guessed):
+      # baseURL https://api.z.ai/api/coding/paas/v4, OpenAI-Completions
+      # protocol, Bearer auth, `compat.zaiToolStream: true` (Z.ai-specific
+      # tool-call streaming quirk pi-ai already handles). Deliberately NOT
+      # the Anthropic-Messages endpoint (https://api.z.ai/api/anthropic)
+      # some tools (e.g. Claude Code) point at instead — read pi-ai's own
+      # anthropic-messages implementation first and confirmed it defaults to
+      # an `x-api-key` header for a non-OAuth key, which this Z.ai token
+      # (no `sk-ant-oat` prefix) would hit; the installed `zai` route here
+      # already sends the correct header for its own real endpoint.
+      zai:
+        apiKeyEnv: ZAI_API_KEY
 
 # cordis-llm-openai-compat, cordis-tool-serper-web-search, cordis-tool-n8n,
 # and cordis-tool-create-skill moved out to their own packages (each with its
@@ -425,9 +438,11 @@
       name: '@cordis-app/bundle-core/resilience'
     - id: cordis-web-clean
       name: '@cordis-app/bundle-core/web-clean'
-    # User request (2026-09-23): once OPENROUTER_API_KEY is configured, n8n
-    # work should prefer OpenRouter's Claude Sonnet 5 over this deployment's
-    # own default model — see skill-model-preference.ts's own header for the
+    # User request (2026-09-23, extended 2026-09-24): once ZAI_API_KEY or
+    # OPENROUTER_API_KEY is configured (Z.ai's glm-5.3 preferred first, then
+    # OpenRouter's Claude Sonnet 5 — config.candidates, in that order), n8n
+    # work should prefer that stronger route over this deployment's own
+    # default model — see skill-model-preference.ts's own header for the
     # full rationale (trigger, sticky-not-reversible choice, silent no-op
     # when unconfigured).
     - id: cordis-skill-model-preference

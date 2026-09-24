@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 # Cordis Agent Core — one image, one process (architecture doc §2.1/§8.1).
 # Thin fork of dsh (npm dependency on @deepseek-ai/dsh + the individual
 # @deepseek-ai/dsh-* packages this bundle imports — see
@@ -15,7 +16,16 @@
 FROM node:22-bookworm-slim AS web-builder
 WORKDIR /web
 COPY apps/web/package.json apps/web/pnpm-lock.yaml apps/web/pnpm-workspace.yaml ./
-RUN corepack enable && corepack prepare pnpm@10.15.0 --activate \
+# Cache mount, added after 2 real consecutive build failures (2026-09-24,
+# network timeout fetching @img/sharp-libvips-linux-arm64 mid-install, ~4 min
+# in each time): with no mount here, a retry re-downloads all 640+ packages
+# from zero — a transient registry blip on one large binary wastes the whole
+# install instead of just that one retry. The cache persists across builds
+# (keyed by `id`, BuildKit-managed, not part of the image itself), so a retry
+# only re-fetches what genuinely failed. `--mount` must be a RUN-instruction
+# flag, immediately after RUN — not embedded inside the shell command chain.
+RUN --mount=type=cache,id=pnpm-store-web,target=/root/.local/share/pnpm/store \
+    corepack enable && corepack prepare pnpm@10.15.0 --activate \
  && pnpm install --frozen-lockfile
 COPY apps/web/ ./
 RUN pnpm run build
@@ -29,7 +39,8 @@ COPY packages/tool/serper-web-search/package.json packages/tool/serper-web-searc
 COPY packages/tool/n8n/package.json packages/tool/n8n/
 COPY packages/tool/create-skill/package.json packages/tool/create-skill/
 COPY packages/tool/gmail-browser/package.json packages/tool/gmail-browser/
-RUN corepack enable && corepack prepare pnpm@11.7.0 --activate \
+RUN --mount=type=cache,id=pnpm-store-core,target=/root/.local/share/pnpm/store \
+    corepack enable && corepack prepare pnpm@11.7.0 --activate \
  && pnpm install --frozen-lockfile
 COPY packages/bundle-core/ packages/bundle-core/
 COPY packages/llm/openai-compat/ packages/llm/openai-compat/

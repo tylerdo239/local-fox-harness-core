@@ -155,6 +155,19 @@ function ConfigTab() {
         placeholder={t('settings.openrouterKeyPlaceholder')}
       />
       <CredentialField
+        refName="ZAI_API_KEY"
+        title={t('settings.zaiKeyTitle')}
+        hint={(
+          <>
+            {t('settings.zaiKeyHint')}{' '}
+            <a href="https://z.ai/manage-apikey/apikey-list" target="_blank" rel="noopener noreferrer" className="text-accent-text underline">
+              z.ai
+            </a>
+          </>
+        )}
+        placeholder={t('settings.zaiKeyPlaceholder')}
+      />
+      <CredentialField
         refName="SERPER_API_KEY"
         title={t('settings.webSearchTitle')}
         hint={(
