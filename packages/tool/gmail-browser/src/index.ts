@@ -93,17 +93,36 @@ async function connect(config: Config): Promise<Client> {
 }
 
 /**
- * Run one playwright-mcp tool and return its text, which is what the model
- * reads (page snapshots, error text).
- *
- * The retry is not belt-and-braces: over Streamable HTTP the server owns the
- * MCP session, and restarting that container leaves this side holding a dead
- * one whose every call fails "Session not found" — hit for real. Nothing
- * closes the client for us, so a transport failure drops it and reconnects
- * once. A tool that ran and returned `isError` is NOT retried; only the
- * transport is.
+ * Everything goes to ONE shared browser tab, so two commands in flight at once
+ * can tear each other down: the keepalive opening the inbox the moment core
+ * starts while a tool navigates too ended in "Frame was detached", seen for
+ * real. Commands therefore run strictly one after another.
  */
-async function call(config: Config, tool: string, args: Record<string, unknown>, retry = true): Promise<string> {
+let queue: Promise<unknown> = Promise.resolve()
+
+/**
+ * A navigation cut short by another one — a person clicking in the VNC window
+ * while the agent works, which no queue here can prevent. Worth one retry;
+ * anything else a tool reports is a real answer and is not retried.
+ */
+const INTERRUPTED_NAVIGATION = /Frame was detached|interrupted by another navigation|net::ERR_ABORTED/i
+
+/** Run one playwright-mcp tool and return its text, which is what the model reads (page snapshots, error text). */
+function call(config: Config, tool: string, args: Record<string, unknown>): Promise<string> {
+  const run = queue.then(() => callOnce(config, tool, args), () => callOnce(config, tool, args))
+  queue = run.catch(() => undefined)
+  return run
+}
+
+/**
+ * The transport retry is not belt-and-braces: over Streamable HTTP the server
+ * owns the MCP session, and restarting that container leaves this side holding
+ * a dead one whose every call fails "Session not found" — hit for real.
+ * Nothing closes the client for us, so a transport failure drops it and
+ * reconnects once. Retries stay inside this one queued call: re-entering
+ * `call` from here would wait behind itself forever.
+ */
+async function callOnce(config: Config, tool: string, args: Record<string, unknown>, attempt = 0): Promise<string> {
   const client = await connect(config)
   let result
   try {
@@ -111,12 +130,18 @@ async function call(config: Config, tool: string, args: Record<string, unknown>,
   } catch (error) {
     connecting = undefined
     await client.close().catch(() => undefined)
-    if (retry) return call(config, tool, args, false)
+    if (attempt === 0) return callOnce(config, tool, args, attempt + 1)
     throw error
   }
   const content = Array.isArray(result.content) ? result.content : []
   const text = content.flatMap(block => typeof block.text === 'string' ? [block.text] : []).join('\n').trim()
-  if (result.isError === true) throw new Error(text === '' ? `${tool} failed` : text)
+  if (result.isError === true) {
+    if (attempt === 0 && INTERRUPTED_NAVIGATION.test(text)) {
+      await new Promise(resolve => setTimeout(resolve, 1000))
+      return callOnce(config, tool, args, attempt + 1)
+    }
+    throw new Error(text === '' ? `${tool} failed` : text)
+  }
   return text === '' ? 'ok' : text
 }
 
