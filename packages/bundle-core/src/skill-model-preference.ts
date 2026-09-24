@@ -38,11 +38,27 @@
 // "the user is done with n8n now" and switch back, because there is no
 // reliable signal for that. If this turns out to be the wrong default, it
 // is one config field away from being reconsidered.
+//
+// Only acts while the session is still on the DEPLOYMENT DEFAULT route (user
+// request, 2026-09-24: "chỉ switch khi đang dùng model mặc định self-hosted
+// ... user đổi model khác thì cứ chạy model đó"). Real gap found checking
+// this against the code as written: `maybeSwitch` had no notion of the
+// session's current route at all — a user who had already picked a model by
+// hand in the chat picker (or from an earlier auto-switch) would get
+// silently overridden the next time n8n work triggered this plugin, exactly
+// the kind of surprise the picker's own UI text promises never happens.
+// Tracks each session's current {provider, model} the same way audit.ts
+// already does — a `request/context` session event fires on every route
+// CHANGE (dsh-session's own contract), so this is last-known-good, not a
+// per-event read; a session that has run no step yet since this plugin's own
+// process started reads as `undefined`, treated as "still on default" (the
+// only state a brand-new or freshly-resumed session can be in until proven
+// otherwise).
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
-import type { SessionId } from '@deepseek-ai/dsh-session'
+import type { Session, SessionEvent, SessionId } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-tools'
 import type {} from '@deepseek-ai/dsh-credentials'
 import type {} from '@deepseek-ai/dsh-api-session-controller'
@@ -118,8 +134,21 @@ export function apply(ctx: Context, config: Config): void {
   // that later attempt.
   const switchedSessions = new Set<string>()
 
+  // Same tracking pattern as audit.ts's own `currentRoute` — kept separate,
+  // not shared, since the two plugins have no other coupling and this one
+  // only ever reads its own copy.
+  const currentRoute = new Map<string, { provider: string; model: string }>()
+  ctx.on('session/event', (session: Session, event: SessionEvent) => {
+    if (event.type !== 'request/context') return
+    const data = event.data as { provider: string; model: string }
+    currentRoute.set(session.id, { provider: data.provider, model: data.model })
+  }, { global: true })
+
   const maybeSwitch = (sessionId: SessionId): void => {
     if (switchedSessions.has(sessionId)) return
+    const current = currentRoute.get(sessionId)
+    const deploymentDefaultProvider = ctx.agentDefaultModel.currentSelection().provider
+    if (current !== undefined && current.provider !== deploymentDefaultProvider) return // user (or an earlier switch) already moved this session off the default — respect it, do not override
     // Marked SYNCHRONOUSLY, before any `await` — real race found live: this
     // deployment's own audit history has n8n_upsert_workflow retries firing
     // single-digit milliseconds apart (7ms between two real calls,
