@@ -227,10 +227,12 @@ dùng tên chính xác hoặc dùng `httpRequest` gọi thẳng API của dịch
   làm việc) rồi nhét vào `headerParameters`/`body` của workflow n8n — lỗi thật
   đã xảy ra: model tự copy key thật của Agent vào node HTTP Request rồi báo
   "đã cấu hình xong". Key đó sẽ nằm vĩnh viễn trong n8n, ai có quyền n8n cũng
-  đọc được — rò rỉ credential thật, không phải chuyện nhỏ. Cần gọi AI trong
-  workflow thì luôn hỏi người dùng một API key RIÊNG cho workflow đó (của họ,
-  không phải của Agent), hoặc dùng `genericCredentialType` với credential họ
-  tự tạo trong n8n.
+  đọc được — rò rỉ credential thật, không phải chuyện nhỏ. Cần AI trong
+  workflow mà người dùng **không nêu AI nào** thì gọi chính agent này (mục
+  "Gọi chính agent này từ workflow"), không cần key nào. Chỉ khi họ muốn một
+  AI bên ngoài cụ thể mới hỏi họ API key RIÊNG cho workflow đó (của họ, không
+  phải của Agent), hoặc dùng `genericCredentialType` với credential họ tự tạo
+  trong n8n.
 - **`if` / `filter` / `switch`** — điều kiện dạng
   `{ "options": { "caseSensitive": true, "typeValidation": "strict", "version": 2 },
   "conditions": [{ "leftValue": "={{ $json.x }}", "rightValue": "y",
@@ -341,6 +343,8 @@ tương ứng, không dùng cả hai**. Việc nào dùng cái gì:
 |---|---|
 | Đọc, tìm, tóm tắt, phân loại thư; soạn và gửi trả lời | agent |
 | Đọc đính kèm, tra cứu thông tin, việc cần suy xét | agent |
+| Người dùng chỉ nói "dùng AI" (tóm tắt, dịch, phân loại...) mà không nêu AI nào | agent (không cần API key) |
+| Người dùng nêu đích danh node AI Agent / OpenAI của n8n, API OpenAI/Gemini/Claude, hoặc URL của agent bên thứ ba | **đúng cái họ nêu** — không tráo bằng agent này |
 | Hẹn giờ, nhận webhook | node n8n (trigger) |
 | Gọi một API cố định, ghi một dòng Sheet, rẽ nhánh theo giá trị | node n8n |
 
@@ -400,11 +404,20 @@ không kích hoạt được. Mẫu đủ ba node:
   Agent biết đây là yêu cầu tự động nên làm luôn, không hỏi lại.
 - **Kết quả:** `$json.answer` là câu trả lời; `$json.finish` là `"completed"`
   khi xong bình thường (khác đi thì node trả lỗi HTTP 502, vẫn kèm `answer`).
+  `$json.provider`/`$json.model` cho biết lượt đó chạy bằng model nào.
+- **Chọn model cho lượt chạy** (không bắt buộc): thêm `provider` và `model`
+  vào body, luôn đi cùng nhau —
+  `"={{ JSON.stringify({ prompt: '...', provider: 'openrouter', model: 'anthropic/claude-sonnet-5' }) }}"`.
+  Không ghi thì dùng model mặc định trong Settings. Chỉ ghi khi người dùng
+  yêu cầu một model cụ thể; model sai hoặc nhà cung cấp chưa có key thì route
+  trả lỗi 400 ngay, nói rõ thiếu gì.
 
-## Ví dụ: Gmail → gọi AI tóm tắt/phân loại → gắn nhãn
+## Ví dụ: Gmail trigger → AI bên ngoài của người dùng → gắn nhãn
 
-Bộ khung cho yêu cầu hay gặp nhất ("đọc mail, tóm tắt/phân loại bằng AI, gắn
-nhãn") — dùng lại đúng, đừng viết lại từ đầu mỗi lần:
+**Chỉ dùng khi người dùng muốn một AI bên ngoài cụ thể** và đưa endpoint/key
+của họ. Nếu họ chỉ nói "dùng AI tóm tắt/phân loại thư", dùng mục "Gọi chính
+agent này từ workflow" thay vì khung này — agent tự đọc Gmail, không cần node
+Gmail, không cần key. Khung dưới đây là cho trường hợp AI bên ngoài:
 
 ```json
 {

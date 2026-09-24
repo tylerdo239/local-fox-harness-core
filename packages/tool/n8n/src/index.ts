@@ -41,6 +41,7 @@ import { createUserMessage, type ContentBlock } from '@deepseek-ai/dsh-llm'
 import { SessionId, type Session, type SessionEvent } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-agent-default-model'
+import type {} from '@deepseek-ai/dsh-api-session-controller'
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
 import { WebhookDeliveryId, WebhookRuleId, WebhookSourceId, type VerifiedWebhookDelivery } from '@deepseek-ai/dsh-webhook'
 import type {} from '@deepseek-ai/dsh-tools'
@@ -56,7 +57,8 @@ export const name = 'cordis-n8n'
 // static-path GET/POST convention as gateway.ts (see that file's own header
 // comment for why: ctx.connection.fetch.register() keys by exact pathname).
 // 'agents' + 'agentDefaultModel' back the synchronous agent-run route below.
-export const inject = ['tools', 'credentials', 'webServer', 'webhookRuntime', 'approval', 'connection', 'systemPrompt', 'agents', 'agentDefaultModel']
+// 'sessionController' is only for its model catalog: agent-run checks a caller's model choice against it.
+export const inject = ['tools', 'credentials', 'webServer', 'webhookRuntime', 'approval', 'connection', 'systemPrompt', 'agents', 'agentDefaultModel', 'sessionController']
 
 // In the system prompt rather than the n8n skill: measured, a question like
 // "any recent errors in workflow X?" often skips loading the skill, and then
@@ -78,11 +80,13 @@ const CALL_THIS_AGENT = [
   'A workflow can hand a task to this agent through agent-run, and the agent then does it with its own tools, exactly as it would in chat:',
   'Gmail in a real browser signed in to the user\'s account (search and list, read, send, star, download attachments and read them, PDF included),',
   'web search and reading pages, files and code in its own workspace, and n8n itself.',
-  'It needs nothing fetched for it beforehand — the prompt alone is the task, and the reply comes back in $json.answer.',
+  'It needs nothing fetched for it beforehand — the prompt alone is the task, and the reply comes back in $json.answer. The body may also carry "provider" and "model" to pick the model for that run; without them it uses the default model.',
   'So when a step is something the agent can do, the workflow calls the agent INSTEAD of n8n\'s own node for it, never both:',
   '"summarize the unread mail" is Webhook -> agent -> reply, with no Gmail node in front.',
   'Use n8n\'s own nodes for fixed, mechanical steps that need no judgment: a schedule, a call to a known API, writing a row, branching on a value.',
-  'The call is an HTTP Request node with an n8n Header Auth credential the user created for it (n8n_list_credentials; if there is none, ask the user to create one);',
+  'Which AI a step uses is decided in this order. (1) The user names one — n8n\'s AI Agent node (type @n8n/n8n-nodes-langchain.agent, fed by a chat-model node such as @n8n/n8n-nodes-langchain.lmChatOpenAi; a different thing from this agent despite the name) or OpenAI node, a provider\'s API (OpenAI, ChatGPT, Gemini, Claude), or another agent\'s own URL — then build exactly that, even when no credential for it exists yet (build it anyway and tell the user which credential to create), and never swap this agent in for it. (2) The user asks for this agent ("our agent", "agent của chúng ta", "agent này") — agent-run. (3) The user only says "AI", or the step needs judgment (summarize, translate, classify, draft a reply) without naming who does it — agent-run, which works with no API key; NOT n8n\'s OpenAI node or any AI API, which each need a key the user never gave.',
+  'Do not substitute a non-AI service for a step the user asked AI to do (a translation or sentiment API is not "AI" here).',
+  'The call is an HTTP Request node POSTing to exactly http://core:3080/api/v1/agent-run — that address and no other, never a public domain or an expression — with an n8n Header Auth credential the user created for it (n8n_list_credentials; if there is none, ask the user to create one);',
   'the n8n-workflow-builder skill has the exact node. Never put the secret itself into a workflow.',
 ].join(' ')
 const CALL_THIS_AGENT_ORDER = 2851
@@ -434,6 +438,39 @@ function findCredentialLikeKey(value: unknown, depth = 0): string | undefined {
   return undefined
 }
 
+/**
+ * Every credential a workflow references must exist in n8n. The model writes
+ * placeholders when it has none to attach — "PLACEHOLDER_GMAIL_CREDENTIAL_ID"
+ * on a Gmail node, in a real run — and n8n accepts that workflow, then fails
+ * only at activation or at run time. Checked against the real list instead,
+ * so the error arrives while the model can still fix it.
+ */
+async function missingCredentials(ctx: Context, config: Config, workflow: unknown): Promise<string[]> {
+  const nodes = (workflow as { nodes?: unknown })?.nodes
+  if (!Array.isArray(nodes)) return []
+  const referenced = nodes.flatMap((node: { name?: unknown; type?: unknown; credentials?: unknown }, i: number) =>
+    Object.entries((node?.credentials ?? {}) as Record<string, { id?: unknown; name?: unknown } | undefined>)
+      .map(([kind, entry]) => ({ i, node: String(node?.name), type: String(node?.type), kind, id: entry?.id, name: entry?.name })))
+  if (referenced.length === 0) return []
+  const page = await n8nRequest(ctx, config, '/credentials') as { data: readonly { id: string }[] }
+  const existing = new Set(page.data.map(entry => entry.id))
+  return referenced.filter(ref => typeof ref.id !== 'string' || !existing.has(ref.id)).map(ref =>
+    `nodes[${String(ref.i)}] ("${ref.node}") uses ${ref.kind} credential ${JSON.stringify(ref.name)} with id ${JSON.stringify(ref.id)}, which does not exist in n8n — attach a real one from n8n_list_credentials`
+    + (/gmail/i.test(ref.type) ? `, or, since this agent reads and sends Gmail itself, call it at ${AGENT_RUN_URL} and drop this node` : ', or ask the user to create it'))
+}
+
+/**
+ * The one address a workflow reaches this agent at, from inside n8n's
+ * container (compose service `core`, agentRunPath's default). A model that
+ * knows it should call this agent still gets the address wrong: in real runs
+ * it wrote `https://agent.foxharness.vn/api/run` (a domain that does not
+ * exist) and `={{ $webhookUrl }}`, both with the right credential attached.
+ * Checked here rather than only asked for in the prompt.
+ */
+const AGENT_RUN_URL = 'http://core:3080/api/v1/agent-run'
+/** The Header Auth credential the skill tells the user to create for calling this agent. */
+const AGENT_CREDENTIAL_NAME = 'Fox Agent'
+
 function validateWorkflowStructure(workflow: unknown): { valid: boolean; errors: string[] } {
   const errors: string[] = []
   if (typeof workflow === 'string') {
@@ -460,6 +497,20 @@ function validateWorkflowStructure(workflow: unknown): { valid: boolean; errors:
       if (!Array.isArray(n.position) || n.position.length !== 2) errors.push(`nodes[${String(i)}].position must be a [x, y] pair`)
       if (typeof n.name === 'string' && typeof n.type === 'string') {
         nodes.push({ name: n.name, type: n.type, parameters: n.parameters as Record<string, unknown> | undefined })
+        const url = (n.parameters as { url?: unknown } | undefined)?.url
+        const credentialNames = Object.values((n.credentials ?? {}) as Record<string, { name?: unknown } | undefined>).map(entry => entry?.name)
+        const callsThisAgent = credentialNames.includes(AGENT_CREDENTIAL_NAME) || (typeof url === 'string' && url.includes('/api/v1/agent-run'))
+        // A Gmail node with no credential attached can never run, and in this
+        // deployment it is almost always there by mistake: asked for "a
+        // morning summary of unread mail through our agent", the model put an
+        // n8n Gmail node in front of the agent call three runs out of three,
+        // though the prompt says the agent reads Gmail itself.
+        if (/^n8n-nodes-base\.gmail(Trigger)?$/.test(n.type) && Object.keys((n.credentials ?? {}) as object).length === 0) {
+          errors.push(`nodes[${String(i)}] ("${n.name}") is a Gmail node with no Gmail credential, so it cannot run — to work with mail, call this agent at ${AGENT_RUN_URL} instead (it reads and sends Gmail itself) and drop this node; keep it only if the user has a Gmail OAuth2 credential in n8n (n8n_list_credentials)`)
+        }
+        if (callsThisAgent && url !== AGENT_RUN_URL) {
+          errors.push(`nodes[${String(i)}] ("${n.name}") calls this agent, so its url must be exactly "${AGENT_RUN_URL}" (the core service inside Docker) — not ${JSON.stringify(url)}`)
+        }
         // Real bug found and fixed (user: "các task sửa n8n cho dùng gmail
         // thông minh hơn xong hết chưa" — following up on a real test where
         // the model, despite n8n_list_credentials existing and SKILL.md's
@@ -724,28 +775,91 @@ const AGENT_RUN_TIMEOUT_MS = 10 * 60_000
 // the Gmail tools' own prompt section tells it to act when a task says this.
 const AUTOMATION_NOTE = 'Automated request from n8n — nobody is available to answer questions, so carry the task out and report the result.'
 
-async function runAgent(ctx: Context, prompt: string): Promise<{ sessionId: string; finish: string; answer: string }> {
+/**
+ * The key each model provider reads, as named where the provider is set up:
+ * packages/llm/openai-compat/cordis.patch.yml (openai-compat) and
+ * packages/bundle-core/cordis.patch.yml (openrouter, zai); deepseek-official
+ * is dsh's own default. Settings > Config writes these same names, so a key
+ * set there is what this check and the provider both see.
+ */
+const PROVIDER_KEYS: Record<string, string> = {
+  'openai-compat': 'OPENAI_API_KEY',
+  openrouter: 'OPENROUTER_API_KEY',
+  zai: 'ZAI_API_KEY',
+  'deepseek-official': 'DEEPSEEK_API_KEY',
+}
+
+interface ModelChoice { readonly provider: string; readonly model: string }
+
+/**
+ * A caller's own model for one run, checked before any session exists: an
+ * unknown model or a provider without its key would otherwise surface only as
+ * a failed turn, after n8n has already waited for it.
+ */
+async function modelChoice(ctx: Context, body: Record<string, unknown>): Promise<ModelChoice | undefined> {
+  const provider = typeof body.provider === 'string' && body.provider !== '' ? body.provider : undefined
+  const model = typeof body.model === 'string' && body.model !== '' ? body.model : undefined
+  if (provider === undefined && model === undefined) return undefined
+  if (provider === undefined || model === undefined) throw new WebhookHttpError(400, 'send "provider" and "model" together, or neither to use the default model')
+  // The self-hosted route is not in dsh's own catalog (gateway.ts prepends it
+  // to /model-catalog for the same reason), so only its key is checked.
+  if (provider !== 'openai-compat') {
+    const catalog = await ctx.sessionController.modelCatalog()
+    const group = catalog.groups.find(entry => entry.id === provider)
+    if (group === undefined) {
+      throw new WebhookHttpError(400, `unknown provider "${provider}" — one of: openai-compat, ${catalog.groups.map(entry => entry.id).join(', ')}`)
+    }
+    if (!group.models.some(entry => entry.id === model)) {
+      throw new WebhookHttpError(400, `provider "${provider}" has no model "${model}" — GET /api/v1/model-catalog lists them`)
+    }
+  }
+  const keyName = PROVIDER_KEYS[provider]
+  if (keyName !== undefined) {
+    const key = await ctx.credentials.resolve(credentialRef(keyName))
+    if (key === undefined || key.value === '') throw new WebhookHttpError(400, `${keyName} is not set — add it in Settings > Config to use ${provider}`)
+  }
+  return { provider, model }
+}
+
+async function runAgent(ctx: Context, prompt: string, choice?: ModelChoice): Promise<{ sessionId: string; finish: string; answer: string; provider: string; model: string }> {
   const cwd = join(process.env.CORDIS_WORKSPACE_ROOT ?? tmpdir(), randomUUID())
   await mkdir(cwd, { recursive: true })
+  // Passed straight into create(), never through sessionController's own
+  // selectModel(): that one also rewrites the deployment-wide default (see
+  // gateway.ts /session-select-model), and a model picked for one run must
+  // not change what every other chat uses. The default's reasoning effort is
+  // dropped on another provider, whose own default fits its models.
+  const base = ctx.agentDefaultModel.currentSelection()
+  const agentOptions = choice === undefined
+    ? base
+    : choice.provider === base.provider ? { ...base, model: choice.model } : { provider: choice.provider, model: choice.model }
   const handle = await ctx.agents.create({
     sessionId: SessionId(randomUUID()),
     meta: { cwd },
-    agentOptions: ctx.agentDefaultModel.currentSelection(),
+    agentOptions,
   })
   const { agent } = handle
   return new Promise((resolve) => {
     let answer = ''
+    // The model that actually answered, which is not always the one the run
+    // started on: skill-model-preference moves a session onto Z.ai/OpenRouter
+    // mid-turn once it touches n8n. Every model request logs its route as
+    // request/context, the same event that plugin itself follows.
+    let route = { provider: agentOptions.provider, model: agentOptions.model }
     // cancel() ends the turn, and the turn/end it produces resolves this.
     const timer = setTimeout(() => agent.cancel({ kind: 'user' }), AGENT_RUN_TIMEOUT_MS)
     const dispose = ctx.on('session/event', (session: Session, event: SessionEvent) => {
       if (session.id !== agent.session.id) return
-      if (event.type === 'assistant/message') {
+      if (event.type === 'request/context') {
+        const data = event.data as { provider?: unknown; model?: unknown }
+        if (typeof data.provider === 'string' && typeof data.model === 'string') route = { provider: data.provider, model: data.model }
+      } else if (event.type === 'assistant/message') {
         const text = event.data.message.content.flatMap(part => part.type === 'text' ? [part.text] : []).join('').trim()
         if (text !== '') answer = text
       } else if (event.type === 'turn/end') {
         clearTimeout(timer)
         dispose()
-        resolve({ sessionId: agent.session.id, finish: event.data.reason.kind, answer })
+        resolve({ sessionId: agent.session.id, finish: event.data.reason.kind, answer, ...route })
         // The run is over and nobody holds this agent: let it go now rather
         // than leave it live until dsh's idle sweep, during which the session
         // could not be deleted from the sidebar. Its history stays on disk,
@@ -769,7 +883,7 @@ function createAgentRunHandler(ctx: Context, config: Config) {
     try {
       const body = await readTrustedJson(ctx, config, req, res)
       if (typeof body.prompt !== 'string' || body.prompt.trim() === '') throw new WebhookHttpError(400, 'missing string field "prompt"')
-      const result = await runAgent(ctx, body.prompt)
+      const result = await runAgent(ctx, body.prompt, await modelChoice(ctx, body))
       // Cancelled (the timeout ran out) or failed: hand back whatever was said
       // anyway, so n8n's error branch has something to show.
       reply(result.finish === 'completed' ? 200 : 502, result)
@@ -970,7 +1084,10 @@ export function apply(ctx: Context, config: Config): void {
     },
     output: { schema: { type: 'json' }, render: renderJson },
     async execute(args) {
-      return asJson(validateWorkflowStructure(resolveWorkflowArg(args)))
+      const workflow = resolveWorkflowArg(args)
+      const local = validateWorkflowStructure(workflow)
+      const errors = [...local.errors, ...await missingCredentials(ctx, config, workflow)]
+      return asJson({ valid: errors.length === 0, errors })
     },
   })), 'cordis-n8n: n8n_validate_workflow')
 
@@ -988,8 +1105,9 @@ export function apply(ctx: Context, config: Config): void {
     output: { schema: { type: 'json' }, render: renderJson },
     async execute(args, exec) {
       const workflow = resolveWorkflowArg(args)
-      const { valid, errors } = validateWorkflowStructure(workflow)
-      if (!valid) throw new Error(`workflow failed local validation: ${errors.join('; ')}`)
+      const local = validateWorkflowStructure(workflow)
+      const errors = [...local.errors, ...await missingCredentials(ctx, config, workflow)]
+      if (errors.length > 0) throw new Error(`workflow failed local validation: ${errors.join('; ')}`)
       let workflowId = args.workflowId
       // Real bug found and fixed (user: "nó tự tạo 2 flow duplicate y hệt
       // nhau"): nothing stopped the model from calling this tool twice with
