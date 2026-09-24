@@ -16,7 +16,7 @@ import { mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { join, relative, resolve, sep } from 'node:path'
 import { tmpdir } from 'node:os'
 import type { Context } from '@deepseek-ai/cordis'
-import type { Agent } from '@deepseek-ai/dsh-agent'
+import type { Agent, AgentHandle } from '@deepseek-ai/dsh-agent'
 // Context/Events declaration-merge augmentations only apply when the file
 // that declares them is part of the compiled program — these three are never
 // referenced by name below, only through the ctx.<key> they add.
@@ -112,6 +112,15 @@ type Handler = (request: Request) => Promise<Response>
 
 /** Cold-session resume in flight, keyed by session id — dedupes concurrent requests for the same id. */
 const resuming = new Map<string, Promise<Agent | undefined>>()
+/**
+ * The handle of every agent this gateway created or resumed, by session id.
+ * `handle.dispose()` is the one way to let a live agent go before dsh's own
+ * idle sweep does, and deleting a session needs exactly that: without it every
+ * recently used chat answered "session is still live" until the sweep came
+ * round, which in practice meant deleting a chat just failed. The handles were
+ * being dropped the moment they were returned.
+ */
+const handles = new Map<string, AgentHandle>()
 
 interface PendingApproval {
   readonly sessionId: string
@@ -306,11 +315,13 @@ export function apply(ctx: Context): void {
       const cwd = requireString(body, 'cwd') ?? join(workspaceRoot(), randomUUID())
       await mkdir(cwd, { recursive: true })
       const sessionId = SessionId(randomUUID())
-      const { agent } = await ctx.agents.create({
+      const handle = await ctx.agents.create({
         sessionId,
         meta: { cwd },
         agentOptions: ctx.agentDefaultModel.currentSelection(),
       })
+      handles.set(sessionId, handle)
+      const { agent } = handle
       return json({ sessionId: agent.session.id, cwd })
     },
     GET: async () => {
@@ -364,9 +375,23 @@ export function apply(ctx: Context): void {
       const body = await readJson(request)
       const sessionId = requireString(body, 'sessionId')
       if (sessionId === undefined) return badRequest('sessionId is required')
-      if (ctx.agents.get(SessionId(sessionId)) !== undefined) {
-        return json({ error: 'session is still live — wait for it to go idle before deleting' }, 409)
+      const live = ctx.agents.get(SessionId(sessionId))
+      if (live !== undefined) {
+        const handle = handles.get(sessionId)
+        // Opened by something other than this gateway (a scheduled or
+        // webhook-started run): its owner holds the handle, not us.
+        if (handle === undefined) {
+          return json({ error: 'session is still live — wait for it to go idle before deleting' }, 409)
+        }
+        // Deleting is an explicit stop: a turn still running is cancelled
+        // and allowed to settle before its agent is let go.
+        if (live.status === 'running') {
+          live.cancel({ kind: 'user' })
+          await live.whenIdle()
+        }
+        await handle.dispose()
       }
+      handles.delete(sessionId)
       await deleteSessionFiles(sessionId)
       return json({ ok: true })
     },
@@ -668,7 +693,7 @@ export function apply(ctx: Context): void {
       }
       const newSessionId = SessionId(randomUUID())
       const sourceCwd = sourceObservation.header.cwd
-      const { agent } = await ctx.agents.create({
+      const handle = await ctx.agents.create({
         sessionId: newSessionId,
         meta: {
           ...sourceCwd === undefined ? {} : { cwd: sourceCwd },
@@ -679,7 +704,8 @@ export function apply(ctx: Context): void {
         seed: events,
         agentOptions: ctx.agentDefaultModel.currentSelection(),
       })
-      return json({ sessionId: agent.session.id })
+      handles.set(newSessionId, handle)
+      return json({ sessionId: handle.agent.session.id })
     },
   })
 
@@ -766,7 +792,7 @@ async function resolveAgent(ctx: Context, sessionId: SessionId): Promise<Agent |
     pending = ctx.agents.resume({
       resumeSessionId: sessionId,
       agentOptions: ctx.agentDefaultModel.currentSelection(),
-    }).then(handle => handle.agent).catch(() => undefined).finally(() => resuming.delete(key))
+    }).then((handle) => { handles.set(key, handle); return handle.agent }).catch(() => undefined).finally(() => resuming.delete(key))
     resuming.set(key, pending)
   }
   return pending

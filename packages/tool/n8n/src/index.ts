@@ -727,11 +727,12 @@ const AUTOMATION_NOTE = 'Automated request from n8n — nobody is available to a
 async function runAgent(ctx: Context, prompt: string): Promise<{ sessionId: string; finish: string; answer: string }> {
   const cwd = join(process.env.CORDIS_WORKSPACE_ROOT ?? tmpdir(), randomUUID())
   await mkdir(cwd, { recursive: true })
-  const { agent } = await ctx.agents.create({
+  const handle = await ctx.agents.create({
     sessionId: SessionId(randomUUID()),
     meta: { cwd },
     agentOptions: ctx.agentDefaultModel.currentSelection(),
   })
+  const { agent } = handle
   return new Promise((resolve) => {
     let answer = ''
     // cancel() ends the turn, and the turn/end it produces resolves this.
@@ -745,6 +746,11 @@ async function runAgent(ctx: Context, prompt: string): Promise<{ sessionId: stri
         clearTimeout(timer)
         dispose()
         resolve({ sessionId: agent.session.id, finish: event.data.reason.kind, answer })
+        // The run is over and nobody holds this agent: let it go now rather
+        // than leave it live until dsh's idle sweep, during which the session
+        // could not be deleted from the sidebar. Its history stays on disk,
+        // and opening it later resumes it like any other chat.
+        void handle.dispose().catch((error: unknown) => { ctx.logger.warn('cordis-n8n: agent-run dispose failed', error) })
       }
     }, { global: true })
     agent.followup(createUserMessage({
