@@ -321,6 +321,86 @@ dùng tên chính xác hoặc dùng `httpRequest` gọi thẳng API của dịch
 Biểu thức n8n viết dạng `"={{ $json.ten_truong }}"` — thiếu dấu `=` mở đầu thì
 n8n hiểu là chuỗi văn bản thường.
 
+## Gọi chính agent này từ workflow
+
+Workflow có thể **giao cả một việc cho agent này** qua `POST /api/v1/agent-run`.
+Agent làm bằng đúng bộ tool nó có trong chat, rồi trả câu trả lời về cho node
+sau ở `$json.answer`. Agent làm được:
+
+- **Gmail**, qua trình duyệt thật đã đăng nhập tài khoản của người dùng: tìm và
+  liệt kê thư, đọc thư, gửi thư, gắn sao, tải đính kèm về và đọc nội dung
+  (kể cả PDF).
+- Tra cứu web và đọc trang; đọc, viết file và chạy code trong workspace của nó;
+  làm việc với chính n8n.
+
+Agent **không cần ai lấy dữ liệu sẵn cho nó** — prompt là toàn bộ nhiệm vụ.
+Vì vậy một bước nào agent làm được thì workflow **gọi agent thay cho node n8n
+tương ứng, không dùng cả hai**. Việc nào dùng cái gì:
+
+| Việc | Dùng |
+|---|---|
+| Đọc, tìm, tóm tắt, phân loại thư; soạn và gửi trả lời | agent |
+| Đọc đính kèm, tra cứu thông tin, việc cần suy xét | agent |
+| Hẹn giờ, nhận webhook | node n8n (trigger) |
+| Gọi một API cố định, ghi một dòng Sheet, rẽ nhánh theo giá trị | node n8n |
+
+Trường hợp hay nhầm: "khi được gọi thì tóm tắt 3 thư chưa đọc" **không** có
+node Gmail của n8n nào — agent tự đọc Gmail. Đặt node Gmail phía trước vừa
+thừa, vừa đòi credential Gmail OAuth2 mà n8n thường không có, và workflow sẽ
+không kích hoạt được. Mẫu đủ ba node:
+
+```json
+{
+  "name": "tom-tat-mail",
+  "nodes": [
+    { "id": "1", "name": "Webhook", "type": "n8n-nodes-base.webhook", "typeVersion": 2,
+      "position": [0, 0], "webhookId": "tom-tat-mail",
+      "parameters": { "httpMethod": "POST", "path": "tom-tat-mail", "responseMode": "lastNode" } },
+    { "id": "2", "name": "Goi Fox Agent", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2,
+      "position": [220, 0],
+      "parameters": {
+        "method": "POST",
+        "url": "http://core:3080/api/v1/agent-run",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ prompt: 'Tóm tắt 3 thư chưa đọc mới nhất trong Gmail' }) }}",
+        "options": { "timeout": 600000 }
+      },
+      "credentials": { "httpHeaderAuth": { "id": "<id từ n8n_list_credentials>", "name": "<name từ đó>" } } },
+    { "id": "3", "name": "Lay cau tra loi", "type": "n8n-nodes-base.set", "typeVersion": 3.4,
+      "position": [440, 0],
+      "parameters": { "assignments": { "assignments": [
+        { "id": "a1", "name": "answer", "value": "={{ $json.answer }}", "type": "string" }
+      ] } } }
+  ],
+  "connections": {
+    "Webhook": { "main": [[{ "node": "Goi Fox Agent", "type": "main", "index": 0 }]] },
+    "Goi Fox Agent": { "main": [[{ "node": "Lay cau tra loi", "type": "main", "index": 0 }]] }
+  },
+  "settings": {}
+}
+```
+
+- **Xác thực bằng credential, không bằng secret.** Route đòi header
+  `x-n8n-webhook-secret`; người dùng giữ giá trị đó trong một credential n8n
+  kiểu **Header Auth**. Tìm nó bằng `n8n_list_credentials` (loại
+  `httpHeaderAuth`) và gắn như trên. Chưa có thì **dừng lại và nhờ người dùng
+  tạo**: Header Auth, Name = `x-n8n-webhook-secret`, Value = giá trị
+  `N8N_WEBHOOK_SECRET` trong Settings của app. Không tự đọc, không tự chép
+  secret đó vào workflow — cùng lý do với mục `httpRequest` ở trên.
+- **URL là `http://core:3080`**, tên service trong mạng Docker — không phải
+  `localhost`/`127.0.0.1`, vì node chạy bên trong container n8n.
+- **`timeout: 600000`** (10 phút) là bắt buộc: agent lái trình duyệt mất từ vài
+  giây tới vài phút, mặc định của node ngắn hơn nhiều và sẽ bỏ cuộc giữa chừng.
+- **Prompt là nhiệm vụ đầy đủ**, viết như người dùng gõ trong chat; ghép dữ
+  liệu từ node trước bằng biểu thức, ví dụ
+  `"={{ JSON.stringify({ prompt: 'Trả lời thư của ' + $json.body.email }) }}"`.
+  Agent biết đây là yêu cầu tự động nên làm luôn, không hỏi lại.
+- **Kết quả:** `$json.answer` là câu trả lời; `$json.finish` là `"completed"`
+  khi xong bình thường (khác đi thì node trả lỗi HTTP 502, vẫn kèm `answer`).
+
 ## Ví dụ: Gmail → gọi AI tóm tắt/phân loại → gắn nhãn
 
 Bộ khung cho yêu cầu hay gặp nhất ("đọc mail, tóm tắt/phân loại bằng AI, gắn

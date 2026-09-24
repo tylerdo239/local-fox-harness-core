@@ -68,6 +68,25 @@ const NAMES_NOT_IDS = [
 ].join(' ')
 const NAMES_NOT_IDS_ORDER = 2850
 
+// Without this the model cannot know POST agentRunPath exists: asked to build
+// "n8n calls our agent, the agent does the Gmail work", it answered that this
+// agent "has no API endpoint" and fell back to n8n's own Gmail node — the
+// route was real and working, it just was never mentioned anywhere the model
+// reads. In the system prompt rather than only the skill, for the same reason
+// as NAMES_NOT_IDS above: n8n work often starts without loading the skill.
+const CALL_THIS_AGENT = [
+  'A workflow can hand a task to this agent through agent-run, and the agent then does it with its own tools, exactly as it would in chat:',
+  'Gmail in a real browser signed in to the user\'s account (search and list, read, send, star, download attachments and read them, PDF included),',
+  'web search and reading pages, files and code in its own workspace, and n8n itself.',
+  'It needs nothing fetched for it beforehand — the prompt alone is the task, and the reply comes back in $json.answer.',
+  'So when a step is something the agent can do, the workflow calls the agent INSTEAD of n8n\'s own node for it, never both:',
+  '"summarize the unread mail" is Webhook -> agent -> reply, with no Gmail node in front.',
+  'Use n8n\'s own nodes for fixed, mechanical steps that need no judgment: a schedule, a call to a known API, writing a row, branching on a value.',
+  'The call is an HTTP Request node with an n8n Header Auth credential the user created for it (n8n_list_credentials; if there is none, ask the user to create one);',
+  'the n8n-workflow-builder skill has the exact node. Never put the secret itself into a workflow.',
+].join(' ')
+const CALL_THIS_AGENT_ORDER = 2851
+
 interface RouteConfig {
   readonly workspacePath: string
   readonly title: string
@@ -805,6 +824,7 @@ function registerAutomationsRoute(ctx: Context, path: string, handlers: Partial<
 
 export function apply(ctx: Context, config: Config): void {
   ctx.systemPrompt.section({ name: 'cordis-n8n:names-not-ids', order: NAMES_NOT_IDS_ORDER, text: NAMES_NOT_IDS })
+  ctx.systemPrompt.section({ name: 'cordis-n8n:call-this-agent', order: CALL_THIS_AGENT_ORDER, text: CALL_THIS_AGENT })
   // Read-only dashboard data for apps/web's /automations page — separate
   // from the agent-facing n8n_* tools above (an LLM tool call and a browser
   // fetch are different trust boundaries: this route only ever reads).
