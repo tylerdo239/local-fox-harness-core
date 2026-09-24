@@ -107,6 +107,16 @@ let queue: Promise<unknown> = Promise.resolve()
  */
 const INTERRUPTED_NAVIGATION = /Frame was detached|interrupted by another navigation|net::ERR_ABORTED/i
 
+/**
+ * The current tab itself is dead — its renderer crashed (Gmail is heavy, and
+ * Docker Desktop gives its VM little memory) or the window was closed by hand
+ * over VNC. Every later command on that tab fails the same way, however often
+ * it is retried: reproduced by killing the renderer, which left navigation
+ * answering "Page crashed" until a new tab was opened. A fresh tab is the only
+ * way back.
+ */
+const DEAD_TAB = /Frame was detached|Frame has been detached|Page crashed|Target page, context or browser has been closed/i
+
 /** Run one playwright-mcp tool and return its text, which is what the model reads (page snapshots, error text). */
 function call(config: Config, tool: string, args: Record<string, unknown>): Promise<string> {
   const run = queue.then(() => callOnce(config, tool, args), () => callOnce(config, tool, args))
@@ -136,8 +146,16 @@ async function callOnce(config: Config, tool: string, args: Record<string, unkno
   const content = Array.isArray(result.content) ? result.content : []
   const text = content.flatMap(block => typeof block.text === 'string' ? [block.text] : []).join('\n').trim()
   if (result.isError === true) {
-    if (attempt === 0 && INTERRUPTED_NAVIGATION.test(text)) {
+    // First: maybe just cut short by another navigation — wait and retry.
+    if (attempt === 0 && (INTERRUPTED_NAVIGATION.test(text) || DEAD_TAB.test(text))) {
       await new Promise(resolve => setTimeout(resolve, 1000))
+      return callOnce(config, tool, args, attempt + 1)
+    }
+    // Still dead: the tab is gone for good, so move to a new one.
+    // ponytail: the dead tab is left open (one per crash) — close it here if
+    // crashes turn out frequent enough for tabs to pile up.
+    if (attempt === 1 && DEAD_TAB.test(text)) {
+      await client.callTool({ name: 'browser_tabs', arguments: { action: 'new' } }, undefined, { timeout: config.callTimeoutMs })
       return callOnce(config, tool, args, attempt + 1)
     }
     throw new Error(text === '' ? `${tool} failed` : text)
@@ -468,6 +486,13 @@ export function apply(ctx: Context, config: Config): void {
       const pageUrl = /Page URL: (\S+)/.exec(after)?.[1] ?? ''
       if (pageUrl.includes('view=cm') || pageUrl.includes('compose=')) {
         return `the compose window is still open — the message was NOT sent. What is on screen:\n${trimSnapshot(after)}`
+      }
+      // Not on Gmail at all means the tab died somewhere in the steps above and
+      // the rest ran on the blank one callOnce moved to — "left the compose
+      // URL" then proves nothing. Say so, and steer away from a blind resend,
+      // which is the one outcome worse than a message that did not go out.
+      if (!pageUrl.startsWith('https://mail.google.com/')) {
+        return 'the browser tab was lost while sending, so it is NOT known whether the message went out — check the Sent folder (gmail_list with in:sent) before sending it again'
       }
       return `sent to ${args.to}${args.cc === undefined || args.cc === '' ? '' : ` (cc ${args.cc})`}: "${args.subject}"`
     },
