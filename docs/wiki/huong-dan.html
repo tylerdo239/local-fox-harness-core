@@ -1,0 +1,470 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hướng dẫn Fox Harness</title>
+<style>
+:root{
+  --bg:#f6f7f9; --panel:#ffffff; --fg:#1b1f24; --muted:#5d6570; --line:#e3e6ea;
+  --accent:#f97316; --accent-soft:#fff1e6; --accent-fg:#b45309;
+  --tip:#eaf6ee; --tip-fg:#1f6b3a; --warn:#fdf0e7; --warn-fg:#9a3412;
+  --code:#f1f3f5; --shadow:0 1px 3px rgba(0,0,0,.06),0 6px 20px rgba(0,0,0,.05);
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --bg:#121417; --panel:#1b1e23; --fg:#e8eaed; --muted:#9aa1ab; --line:#2b3037;
+    --accent:#fb923c; --accent-soft:#2b1d12; --accent-fg:#fdba74;
+    --tip:#15261b; --tip-fg:#86d9a4; --warn:#2a1a12; --warn-fg:#fdba74;
+    --code:#23272e; --shadow:0 1px 3px rgba(0,0,0,.4);
+  }
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth;scroll-padding-top:16px}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.6 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+a{color:var(--accent-fg)}
+code{background:var(--code);padding:1px 6px;border-radius:5px;font-size:.9em}
+.layout{display:grid;grid-template-columns:260px 1fr;max-width:1240px;margin:0 auto}
+nav{position:sticky;top:0;height:100vh;overflow:auto;padding:28px 20px;border-right:1px solid var(--line)}
+.brand{display:flex;align-items:center;gap:10px;font-weight:700;font-size:1.15rem;color:var(--accent);margin-bottom:24px}
+.brand span{display:grid;place-items:center;width:34px;height:34px;border-radius:10px;background:var(--accent-soft)}
+nav ol{list-style:none;margin:0;padding:0;counter-reset:n}
+nav li{counter-increment:n}
+nav a{display:flex;gap:10px;padding:8px 10px;border-radius:8px;color:var(--fg);text-decoration:none;font-size:.95rem}
+nav a::before{content:counter(n);display:grid;place-items:center;min-width:22px;height:22px;border-radius:50%;background:var(--line);font-size:.75rem;font-weight:600}
+nav a:hover,nav a.on{background:var(--accent-soft);color:var(--accent-fg)}
+nav a.on::before{background:var(--accent);color:#fff}
+main{padding:36px 40px 80px;min-width:0}
+header.hero{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:28px 32px;box-shadow:var(--shadow);margin-bottom:40px}
+header.hero h1{margin:0 0 6px;font-size:1.8rem}
+header.hero p{margin:0;color:var(--muted)}
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:18px}
+.chip{border:1px solid var(--line);border-radius:999px;padding:4px 12px;font-size:.85rem;background:var(--bg)}
+.chip b{color:var(--accent-fg)}
+section{margin-bottom:56px}
+section>h2{font-size:1.45rem;margin:0 0 4px;display:flex;align-items:center;gap:12px}
+section>h2 .n{display:grid;place-items:center;width:34px;height:34px;border-radius:10px;background:var(--accent);color:#fff;font-size:1rem}
+section>.lead{color:var(--muted);margin:0 0 20px 46px}
+.step{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.5fr);gap:24px;align-items:start;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:20px;margin-bottom:16px;box-shadow:var(--shadow)}
+.step.noimg{grid-template-columns:1fr}
+.step h3{margin:0 0 8px;font-size:1.05rem;display:flex;gap:10px;align-items:baseline}
+.step h3 small{flex:none;display:grid;place-items:center;width:24px;height:24px;border-radius:50%;background:var(--accent-soft);color:var(--accent-fg);font-size:.8rem;font-weight:700}
+.step p,.step ul{margin:0 0 8px}
+.step ul{padding-left:20px}
+.step img{width:100%;border-radius:10px;border:1px solid var(--line);cursor:zoom-in;display:block}
+.placeholder{border:2px dashed var(--line);border-radius:10px;padding:28px 16px;text-align:center;color:var(--muted);font-size:.9rem}
+.note{border-radius:10px;padding:10px 14px;margin:10px 0 0;font-size:.93rem}
+.tip{background:var(--tip);color:var(--tip-fg)}
+.warn{background:var(--warn);color:var(--warn-fg)}
+.say{border-left:3px solid var(--accent);background:var(--accent-soft);padding:8px 12px;border-radius:0 8px 8px 0;margin:6px 0;font-style:italic}
+.flow{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:10px 0}
+.flow span{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:6px 12px;font-size:.9rem}
+.flow i{color:var(--muted);font-style:normal}
+table{width:100%;border-collapse:collapse;font-size:.93rem}
+td,th{padding:8px 10px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+th{color:var(--muted);font-weight:600}
+details{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 18px;margin-bottom:10px}
+summary{cursor:pointer;font-weight:600}
+details p{margin:8px 0 2px;color:var(--muted)}
+#zoom{position:fixed;inset:0;background:rgba(0,0,0,.8);display:none;place-items:center;padding:24px;cursor:zoom-out;z-index:9}
+#zoom img{max-width:100%;max-height:100%;border-radius:10px}
+#zoom.show{display:grid}
+@media (max-width:900px){
+  .layout{grid-template-columns:1fr}
+  nav{position:static;height:auto;border-right:0;border-bottom:1px solid var(--line);padding:16px}
+  nav ol{display:flex;flex-wrap:wrap;gap:4px}
+  main{padding:20px 16px 60px}
+  .step{grid-template-columns:1fr}
+  section>.lead{margin-left:0}
+}
+</style>
+</head>
+<body>
+<div class="layout">
+<nav>
+  <div class="brand"><span>🦊</span>Fox Harness</div>
+  <ol>
+    <li><a href="#bat-dau">Bắt đầu</a></li>
+    <li><a href="#chat">Trò chuyện</a></li>
+    <li><a href="#model">Đổi model</a></li>
+    <li><a href="#skill">Skill</a></li>
+    <li><a href="#gmail">Gmail</a></li>
+    <li><a href="#automation">Tự động hoá (n8n)</a></li>
+    <li><a href="#tu-code-agent">Tự code agent</a></li>
+    <li><a href="#hoi-dap">Hỏi đáp nhanh</a></li>
+  </ol>
+</nav>
+
+<main>
+<header class="hero">
+  <h1>Hướng dẫn sử dụng Fox Harness</h1>
+  <p>Trợ lý AI chạy trên máy của bạn: trò chuyện, đọc và gửi Gmail, tìm web, tự dựng quy trình tự động.</p>
+  <div class="chips">
+    <span class="chip">App chat: <b>127.0.0.1:3080</b></span>
+    <span class="chip">Xem trình duyệt của agent: <b>127.0.0.1:6080</b></span>
+    <span class="chip">n8n: <b>127.0.0.1:5678</b></span>
+  </div>
+</header>
+
+<!-- 1 -->
+<section id="bat-dau">
+  <h2><span class="n">1</span>Bắt đầu</h2>
+  <p class="lead">Mở app, đăng nhập, đổi mật khẩu.</p>
+
+  <div class="step">
+    <div>
+      <h3><small>1</small>Mở app và đăng nhập</h3>
+      <p>Vào <b>http://127.0.0.1:3080</b>.</p>
+      <ul>
+        <li>Tên đăng nhập: <code>admin</code></li>
+        <li>Mật khẩu mặc định: <code>12345678</code></li>
+      </ul>
+      <p class="note tip">Góc phải trên có nút chọn ngôn ngữ và nút bật chế độ tối.</p>
+    </div>
+    <img src="images/01-login.png" alt="Màn hình đăng nhập">
+  </div>
+
+  <div class="step">
+    <div>
+      <h3><small>2</small>Đổi mật khẩu</h3>
+      <p>Bấm <b>Admin</b> ở góc dưới trái → <b>Cài đặt</b>.</p>
+    </div>
+    <img src="images/11-account-menu.png" alt="Menu Admin">
+  </div>
+
+  <div class="step">
+    <div>
+      <h3><small>3</small>Tab Tài khoản</h3>
+      <p>Nhập mật khẩu mới → <b>Lưu mật khẩu mới</b>.</p>
+      <p>Nút <b>Đăng xuất</b> cũng nằm ở đây.</p>
+    </div>
+    <img src="images/15-settings-account.png" alt="Tab Tài khoản">
+  </div>
+</section>
+
+<!-- 2 -->
+<section id="chat">
+  <h2><span class="n">2</span>Trò chuyện</h2>
+  <p class="lead">Hỏi bằng lời thường. Agent tự chọn công cụ để làm.</p>
+
+  <div class="step">
+    <div>
+      <h3><small>1</small>Gửi yêu cầu</h3>
+      <p>Gõ vào ô <b>Nhắn cho agent…</b> → <b>Gửi</b>.</p>
+      <p>Mỗi việc agent làm hiện thành một dòng nhỏ, ví dụ <i>"Đã dùng n8n_list_credentials"</i>. Bấm vào dòng đó để xem chi tiết.</p>
+      <p class="note tip">File agent tạo ra hoặc tải về nằm ở thanh <b>Tệp trong thư mục làm việc</b>, ngay trên ô nhập.</p>
+    </div>
+    <img src="images/02-chat.png" alt="Một cuộc trò chuyện">
+  </div>
+
+  <div class="step">
+    <div>
+      <h3><small>2</small>Đổi tên, xoá cuộc trò chuyện</h3>
+      <p>Rê chuột vào một dòng ở thanh bên → bấm <b>…</b> → <b>Đổi tên</b> hoặc <b>Xoá</b>.</p>
+      <p>Bấm <b>Trò chuyện mới</b> để mở cuộc trò chuyện mới.</p>
+    </div>
+    <img src="images/12-chat-row-menu.png" alt="Menu của một cuộc trò chuyện">
+  </div>
+</section>
+
+<!-- 3 -->
+<section id="model">
+  <h2><span class="n">3</span>Đổi model</h2>
+  <p class="lead">Mỗi cuộc trò chuyện có thể dùng model riêng.</p>
+
+  <div class="step">
+    <div>
+      <h3><small>1</small>Chọn model</h3>
+      <p>Bấm nút model cạnh ô nhập (bên trái nút <b>Gửi</b>) → chọn một model.</p>
+      <ul>
+        <li><b>Tự triển khai (mặc định)</b>: model có sẵn.</li>
+        <li><b>ZAI</b>: các model GLM.</li>
+        <li><b>OpenRouter</b>: Claude, GPT…</li>
+      </ul>
+      <p class="note tip">Đổi model chỉ áp dụng cho cuộc trò chuyện đang mở.</p>
+    </div>
+    <img src="images/03-model-picker.png" alt="Nút chọn model">
+  </div>
+
+  <div class="step">
+    <div>
+      <h3><small>2</small>Dán key cho Z.ai / OpenRouter</h3>
+      <p>Muốn dùng Z.ai hay OpenRouter thì cần key của nhà cung cấp đó.</p>
+      <p><b>Admin → Cài đặt → Cấu hình</b> → dán key → <b>Lưu</b>.</p>
+      <p>Lấy key: <a href="https://z.ai">z.ai</a> · <a href="https://openrouter.ai/keys">openrouter.ai/keys</a></p>
+      <p class="note tip">Chưa có key mà vẫn chọn, app sẽ tự mở trang này để bạn dán key.</p>
+    </div>
+    <img src="images/04-settings-config.png" alt="Tab Cấu hình">
+  </div>
+</section>
+
+<!-- 4 -->
+<section id="skill">
+  <h2><span class="n">4</span>Skill</h2>
+  <p class="lead">Skill là bản hướng dẫn giúp agent làm một loại việc theo cách của bạn.</p>
+
+  <div class="step">
+    <div>
+      <h3><small>1</small>Gọi skill bằng dấu <code>/</code></h3>
+      <p>Gõ <code>/</code> trong ô chat → chọn skill → viết tiếp yêu cầu.</p>
+      <p>Skill bạn tự tạo có nhãn <b>của tôi</b>.</p>
+    </div>
+    <img src="images/07-slash-menu.png" alt="Menu skill">
+  </div>
+
+  <div class="step">
+    <div>
+      <h3><small>2</small>Xem, sửa, xoá skill</h3>
+      <p>Bấm <b>Kỹ năng</b> ở thanh bên.</p>
+      <ul>
+        <li><b>Skill của tôi</b>: sửa được, xoá được.</li>
+        <li><b>Skill có sẵn</b>: chỉ xem.</li>
+      </ul>
+    </div>
+    <img src="images/06-skills.png" alt="Danh sách skill">
+  </div>
+
+  <div class="step">
+    <div>
+      <h3><small>3</small>Tạo skill mới</h3>
+      <p><b>Kỹ năng → Tạo skill mới</b>, rồi điền:</p>
+      <ul>
+        <li><b>Tên</b>: chữ thường và gạch ngang, ví dụ <code>bao-cao-tuan</code></li>
+        <li><b>Mô tả</b>: khi nào thì dùng skill này</li>
+        <li><b>Nội dung</b>: hướng dẫn chi tiết</li>
+      </ul>
+      <p class="note tip">Cách nhanh hơn: nói trong chat <span class="say">"Tạo cho tôi skill viết báo cáo tuần…"</span> Agent gửi bản nháp cho bạn xem, bạn đồng ý thì nó mới lưu.</p>
+    </div>
+    <img src="images/13-skill-new.png" alt="Tạo skill mới">
+  </div>
+</section>
+
+<!-- 5 -->
+<section id="gmail">
+  <h2><span class="n">5</span>Gmail</h2>
+  <p class="lead">Agent dùng Gmail qua một trình duyệt thật. Bạn xem được mọi thao tác của nó.</p>
+
+  <div class="step">
+    <div>
+      <h3><small>1</small>Mở màn hình trình duyệt của agent</h3>
+      <p>Vào <b>http://127.0.0.1:6080/vnc.html</b> → bấm <b>Connect</b>.</p>
+    </div>
+    <img src="images/09-novnc-connect.png" alt="noVNC">
+  </div>
+
+  <div class="step">
+    <div>
+      <h3><small>2</small>Đăng nhập Gmail (chỉ một lần)</h3>
+      <p>Trong cửa sổ đó, mở <code>mail.google.com</code> và đăng nhập như bình thường.</p>
+      <p>Thấy hộp thư là xong. Lần sau không phải đăng nhập lại.</p>
+      <p class="note warn">Ai mở được trang này là đọc được thư của bạn. Đừng chia sẻ địa chỉ này ra ngoài.</p>
+    </div>
+    <img src="images/10-novnc-gmail.png" alt="Gmail trong noVNC (đã làm mờ)">
+  </div>
+
+  <div class="step noimg">
+    <div>
+      <h3><small>3</small>Nhờ agent làm việc</h3>
+      <p>Nói trong chat, ví dụ:</p>
+      <div class="say">Tóm tắt 5 thư chưa đọc mới nhất.</div>
+      <div class="say">Tìm thư có file PDF trong tuần này, tải về và tóm tắt.</div>
+      <div class="say">Gửi thư cho an@congty.vn, tiêu đề "Họp thứ 2", nội dung …</div>
+      <p class="note tip">Trước khi <b>gửi, trả lời hay xoá</b> thư, agent luôn hỏi lại bạn. Đọc và tìm thư thì agent làm luôn.</p>
+      <p class="note warn">Trong lúc agent đang làm, đừng bấm vào cửa sổ noVNC: cú bấm của bạn có thể làm gián đoạn agent. Mỗi lần chỉ nên có một cuộc trò chuyện dùng Gmail.</p>
+    </div>
+  </div>
+</section>
+
+<!-- 6 -->
+<section id="automation">
+  <h2><span class="n">6</span>Tự động hoá (n8n)</h2>
+  <p class="lead">Nhờ agent dựng quy trình tự động, ví dụ mỗi sáng tóm tắt thư mới.</p>
+
+  <div class="step">
+    <div>
+      <h3><small>1</small>Chuẩn bị (một lần)</h3>
+      <ul>
+        <li>Mở <b>http://127.0.0.1:5678</b> → đăng nhập tài khoản n8n đã được cấp. Không ghi hoặc chia sẻ mật khẩu trong chat, tài liệu hay workflow.</li>
+        <li>Trong n8n: <b>Settings → n8n API</b> → tạo API key.</li>
+        <li>Trong Fox Harness: <b>Cài đặt → Cấu hình</b>:
+          <ul>
+            <li>dán key vừa tạo vào ô <b>n8n API key</b>;</li>
+            <li>tự đặt một chuỗi bí mật bất kỳ vào ô <b>n8n webhook secret</b>.</li>
+          </ul>
+        </li>
+      </ul>
+    </div>
+    <img src="images/05-settings-n8n.png" alt="Các ô n8n">
+  </div>
+
+  <div class="step">
+    <div>
+      <h3><small>2</small>Kiểm tra credential "Fox Agent" trong n8n</h3>
+      <p>Credential này để workflow gọi được agent. Vào <b>Credentials</b>; nếu đã có <b>Fox Agent</b> kiểu <b>Header Auth</b>, mở nó để kiểm tra. Chỉ tạo mới khi chưa có để tránh credential trùng.</p>
+      <p>Khi tạo mới: <b>Credentials → Create credential → Header Auth</b>:</p>
+      <table>
+        <tr><th>Tên</th><td><code>Fox Agent</code></td></tr>
+        <tr><th>Name</th><td><code>x-n8n-webhook-secret</code></td></tr>
+        <tr><th>Value</th><td>chuỗi bí mật bạn đã đặt ở bước 1</td></tr>
+      </table>
+      <p class="note warn">Giá trị <b>Value</b> là bí mật: không chụp rõ, không gửi qua chat và không dán vào hướng dẫn.</p>
+    </div>
+    <img src="images/16-n8n-credential.png" alt="Credential Fox Agent kiểu Header Auth trong n8n; giá trị secret đã được che">
+  </div>
+
+  <div class="step noimg">
+    <div>
+      <h3><small>3</small>Nhờ agent dựng workflow</h3>
+      <div class="say">Tạo workflow "tom-tat-sang": mỗi sáng 7h tóm tắt thư Gmail chưa đọc.</div>
+      <div class="flow"><span>⏰ 7h sáng</span><i>→</i><span>🦊 Agent đọc Gmail và tóm tắt</span><i>→</i><span>📄 Kết quả</span></div>
+      <ul>
+        <li>Workflow mới tạo luôn ở trạng thái <b>tắt</b>.</li>
+        <li>Muốn bật, nói <i>"kích hoạt workflow tom-tat-sang"</i>. Khung chat sẽ hiện hộp để bạn <b>đồng ý</b>.</li>
+        <li>Muốn sửa, nói tiếp trong <b>cùng cuộc trò chuyện</b>, ví dụ <i>"đổi sang 8h"</i>.</li>
+      </ul>
+      <p class="note tip">Mỗi lần workflow gọi agent sẽ tạo một cuộc trò chuyện mới tên <i>"Automated request from n8n"</i>. Mở ra để xem agent đã làm gì.</p>
+    </div>
+  </div>
+
+  <div class="step">
+    <div>
+      <h3><small>4</small>Xem workflow</h3>
+      <p>Bấm <b>Automations</b> ở thanh bên.</p>
+      <ul>
+        <li><b>đang bật / đang tắt</b>: trạng thái của workflow.</li>
+        <li>Bấm vào một workflow để xem các lần chạy gần đây.</li>
+        <li><b>Mở trong n8n</b>: mở workflow đó để xem chi tiết.</li>
+      </ul>
+    </div>
+    <img src="images/14-automation-runs.png" alt="Tab Automations">
+  </div>
+
+  <div class="step">
+    <div>
+      <h3><small>5</small>Workflow trong n8n</h3>
+      <p>Bước gọi agent là một node <b>HTTP Request</b> dùng credential <b>Fox Agent</b>. Workflow mẫu gồm bước nhận trigger, gọi Fox Agent rồi trả kết quả. Agent tự điền phần này, bạn không cần sửa.</p>
+    </div>
+    <img src="images/17-n8n-workflow.png" alt="Canvas workflow n8n với Webhook, Goi Fox Agent và Tra loi">
+  </div>
+</section>
+
+<!-- 7 -->
+<section id="tu-code-agent">
+  <h2><span class="n">7</span>Tự code agent (dành cho người tự host)</h2>
+  <p class="lead">Bạn có toàn bộ source code. Hãy xem n8n là bộ hẹn giờ/đường ống, còn Fox Agent là phần biết đọc yêu cầu, suy nghĩ và dùng công cụ.</p>
+
+  <div class="step noimg">
+    <div>
+      <h3><small>1</small>Hai luồng phối hợp với nhau như thế nào?</h3>
+      <div class="flow"><span>⏰ n8n: đúng giờ / có sự kiện</span><i>→</i><span>🦊 Fox Agent: hiểu việc cần làm</span><i>→</i><span>🛠️ công cụ: Gmail, web, file, code</span><i>→</i><span>📬 trả kết quả về n8n hoặc chat</span></div>
+      <table>
+        <tr><th>Phần</th><th>Dễ hiểu là</th><th>Nên dùng khi</th></tr>
+        <tr><td><b>n8n</b></td><td>Người điều phối theo quy tắc cố định: đến 7 giờ, có form mới, có dòng dữ liệu mới…</td><td>Hẹn giờ, gọi API đã biết, rẽ nhánh theo dữ liệu, lưu kết quả.</td></tr>
+        <tr><td><b>Fox Agent</b></td><td>Người thực hiện biết đọc ngữ cảnh và tự chọn công cụ.</td><td>Tóm tắt, soạn nội dung, đọc Gmail/tài liệu, tìm web, phân tích hoặc làm việc với file/code.</td></tr>
+        <tr><td><b>Code trong source</b></td><td>Các "bộ phận" làm nên Fox Agent.</td><td>Muốn đổi hành vi lâu dài, thêm công cụ mới, thay giao diện hoặc nối dịch vụ riêng.</td></tr>
+      </table>
+      <p class="note tip">Ví dụ: n8n đánh thức agent lúc 7 giờ; agent đọc thư chưa đọc và viết bản tóm tắt; n8n nhận kết quả để gửi tiếp hoặc lưu lại. Không cần đặt cả Gmail node lẫn Fox Agent làm cùng một việc.</p>
+    </div>
+  </div>
+
+  <div class="step noimg">
+    <div>
+      <h3><small>2</small>"Vibe coding" của agent nằm ở đâu?</h3>
+      <p>Không có nút riêng tên <i>Vibe coding</i>. Đó là cách bạn mô tả kết quả mong muốn bằng lời thường trong <b>khung chat</b>, rồi agent tạo hoặc sửa file trong <b>Tệp trong thư mục làm việc</b>.</p>
+      <div class="say">"Tạo một trang báo giá đơn giản, màu cam, có nút tải PDF; dùng dữ liệu mẫu này…"</div>
+      <div class="say">"Đọc file Excel này, tạo báo cáo tuần và lưu thành file Word để tôi duyệt."</div>
+      <p>Hãy nêu: <b>mục tiêu</b>, <b>người dùng</b>, <b>ví dụ dữ liệu</b>, <b>giao diện/kết quả mong muốn</b> và <b>tiêu chí xong</b>. Bạn xem file agent tạo ở thanh <b>Tệp trong thư mục làm việc</b>, rồi nói tiếp: <i>"đổi màu", "thêm cột", "làm giống mẫu này"</i>.</p>
+      <p class="note warn">Thư mục làm việc của cuộc chat không tự động là source code đang host Fox Harness. Muốn agent sửa chính dự án này qua chat, người quản trị phải đặt/cho phép repo đó trong workspace phù hợp. Bình thường, hãy tự sửa source bằng editor rồi build lại.</p>
+    </div>
+  </div>
+
+  <div class="step noimg">
+    <div>
+      <h3><small>3</small>Bản đồ source: muốn sửa gì thì mở đâu?</h3>
+      <table>
+        <tr><th>Muốn thay đổi</th><th>Chỗ bắt đầu</th><th>Ghi nhớ</th></tr>
+        <tr><td>Tính cách, quy tắc trả lời, cách agent làm việc</td><td><code>packages/bundle-core/src/prompt.ts</code></td><td>Đây là "não hướng dẫn" của agent. Sửa nhỏ, rõ ràng; đừng bỏ các quy tắc an toàn/xác thực nếu chưa hiểu hậu quả.</td></tr>
+        <tr><td>API, chat, approval, file trong workspace</td><td><code>packages/bundle-core/src/gateway.ts</code></td><td>Đây là cầu nối giữa giao diện và phiên chạy agent.</td></tr>
+        <tr><td>Đăng nhập, giao diện, sidebar, chat, trang Automations</td><td><code>apps/web/</code></td><td><code>app/page.tsx</code> là điểm ghép màn hình; các thành phần nằm trong <code>components/features/</code>.</td></tr>
+        <tr><td>Thêm một công cụ riêng, ví dụ CRM hoặc ERP nội bộ</td><td><code>packages/tool/&lt;ten-cong-cu&gt;/src/index.ts</code></td><td>Xem <code>packages/tool/create-skill/</code> làm mẫu nhỏ. Tool phải được đăng ký vào composition, không chỉ tạo một file TypeScript.</td></tr>
+        <tr><td>Luồng n8n gọi agent hoặc agent quản lý workflow</td><td><code>packages/tool/n8n/src/index.ts</code></td><td>Đây là cầu nối n8n ↔ agent; giữ secret trong credential, không ghi thẳng vào source hay workflow.</td></tr>
+        <tr><td>Kết nối model tự host / OpenAI-compatible</td><td><code>packages/llm/openai-compat/</code></td><td>Adapter giao tiếp model; cấu hình model không nên hard-code API key.</td></tr>
+        <tr><td>Quy trình lặp lại không cần viết code</td><td><b>Kỹ năng</b> trong app hoặc <code>packages/skills/</code></td><td>Skill của tôi sửa ngay trên giao diện; skill đóng gói trong source cần build lại.</td></tr>
+      </table>
+    </div>
+  </div>
+
+  <div class="step noimg">
+    <div>
+      <h3><small>4</small>Ba cách tự tuỳ chỉnh, từ dễ đến nâng cao</h3>
+      <ol>
+        <li><b>Không code:</b> tạo/sửa <b>Skill</b> để agent luôn làm theo quy trình, mẫu báo cáo và giọng văn của bạn.</li>
+        <li><b>Chỉnh luồng n8n:</b> vào <b>Automations → Mở trong n8n</b>, đổi lịch chạy hoặc bước cơ học. Test thủ công trước; workflow mới nên để tắt cho đến khi bạn duyệt.</li>
+        <li><b>Sửa source:</b> tạo một nhánh hoặc bản sao lưu, sửa một module trong bảng trên, chạy kiểm tra rồi mới đưa vào dùng.</li>
+      </ol>
+      <p>Với source code, quy trình an toàn là: <b>sửa một việc → chạy <code>pnpm run typecheck</code> → chạy <code>pnpm run build</code> → khởi động lại</b>. Khi chạy Docker, dùng <code>./scripts/start.sh</code> để build và khởi động lại các dịch vụ.</p>
+      <p class="note tip">Các cấu hình triển khai lâu dài nằm ở <code>data/harness/profiles/cordis-app/cordis.patch.yml</code> sau lần chạy Docker đầu tiên. Sửa file này rồi chạy <code>docker compose -f deploy/docker-compose.yml restart core</code>. Đừng đặt API key hoặc password trong file patch; dùng phần Cài đặt → Cấu hình.</p>
+    </div>
+  </div>
+
+  <div class="step noimg">
+    <div>
+      <h3><small>5</small>Công thức thêm một tool riêng</h3>
+      <p>Ví dụ bạn muốn agent tra cứu CRM nội bộ. Đây là phần lập trình, nhưng luồng rất cố định:</p>
+      <ol>
+        <li>Tạo package dưới <code>packages/tool/&lt;ten-cong-cu&gt;/</code>; xem <code>packages/tool/create-skill/</code> làm ví dụ nhỏ nhất.</li>
+        <li>Trong <code>src/index.ts</code>, khai báo tool: tên, dữ liệu đầu vào, dữ liệu trả về và code gọi CRM.</li>
+        <li>Đăng ký package trong <code>deploy/entrypoint.sh</code> và composition để agent thấy tool khi khởi động.</li>
+        <li>Đặt API key trong credential/config, không hard-code vào TypeScript; chạy <code>pnpm run typecheck</code> và <code>pnpm run build</code>.</li>
+      </ol>
+      <p class="note warn">Không sửa trực tiếp <code>node_modules/</code> hoặc dữ liệu phiên/credential trong <code>data/harness/</code> để thêm tính năng: chúng là dependency/trạng thái chạy và thay đổi có thể mất khi cập nhật. Ngoại lệ có chủ đích là <code>data/harness/profiles/cordis-app/cordis.patch.yml</code> ở bước trên để cấu hình deployment. Riêng n8n là tool tuỳ chọn; phần bật/tắt của nó có hướng dẫn chi tiết trong <code>docs/patch-cookbook.md</code>.</p>
+    </div>
+  </div>
+
+  <div class="step noimg">
+    <div>
+      <h3><small>6</small>Khi nào cần người có kỹ thuật?</h3>
+      <p>Bạn có thể tự làm Skill, đổi lịch n8n và yêu cầu agent tạo file/code. Hãy nhờ người có kỹ thuật khi thêm service có API/credential mới, đổi quyền truy cập file, sửa <code>cordis.patch.yml</code>, hoặc đưa app ra Internet. Những thay đổi này có thể ảnh hưởng bảo mật và toàn bộ người dùng.</p>
+    </div>
+  </div>
+</section>
+
+<!-- 8 -->
+<section id="hoi-dap">
+  <h2><span class="n">8</span>Hỏi đáp nhanh</h2>
+  <p class="lead">Các lỗi thường gặp và cách xử lý.</p>
+
+  <details><summary>Agent báo "không có thư" dù hộp thư có thư</summary>
+    <p>Có thể phiên Gmail đã hết hạn. Mở 127.0.0.1:6080 xem: nếu thấy trang đăng nhập Google thì đăng nhập lại. Nếu không, hỏi lại agent một lần nữa.</p></details>
+  <details><summary>Cửa sổ Gmail bị trắng hoặc báo lỗi trang</summary>
+    <p>Agent tự mở tab mới và làm tiếp. Nếu vẫn lỗi, nhờ người quản trị khởi động lại dịch vụ trình duyệt. Bạn không phải đăng nhập lại.</p></details>
+  <details><summary>Agent báo không chắc thư đã được gửi</summary>
+    <p>Trình duyệt bị gián đoạn lúc đang gửi. Kiểm tra thư mục <b>Đã gửi</b> rồi mới nhờ agent gửi lại.</p></details>
+  <details><summary>Xoá trò chuyện báo "session is still live"</summary>
+    <p>Cuộc trò chuyện đó đang chạy, thường là do n8n gọi. Chờ vài phút cho nó chạy xong rồi xoá lại.</p></details>
+  <details><summary>Chọn model Z.ai / OpenRouter thì hiện thông báo lỗi</summary>
+    <p>Chưa dán key. Vào <b>Cài đặt → Cấu hình</b>, dán key rồi chọn lại model.</p></details>
+  <details><summary>Lưu key trong Cấu hình thì báo lỗi</summary>
+    <p>Key này đã được người quản trị đặt sẵn trong file cấu hình máy chủ. Không cần làm gì thêm.</p></details>
+  <details><summary>Agent đứng im, không trả lời</summary>
+    <p>Kéo xuống cuối khung chat xem có hộp nào đang chờ bạn đồng ý không. Nếu không có, bấm nút dừng rồi gửi lại.</p></details>
+  <details><summary>Tab Automations báo lỗi</summary>
+    <p>Chưa dán n8n API key trong <b>Cài đặt → Cấu hình</b>.</p></details>
+</section>
+</main>
+</div>
+
+<div id="zoom"><img alt=""></div>
+<script>
+const zoom = document.getElementById('zoom'), zimg = zoom.querySelector('img')
+document.querySelectorAll('.step img').forEach(img => img.addEventListener('click', () => { zimg.src = img.src; zimg.alt = img.alt; zoom.classList.add('show') }))
+zoom.addEventListener('click', () => zoom.classList.remove('show'))
+document.addEventListener('keydown', e => { if (e.key === 'Escape') zoom.classList.remove('show') })
+const links = [...document.querySelectorAll('nav a')]
+const io = new IntersectionObserver(entries => entries.forEach(e => {
+  if (e.isIntersecting) links.forEach(a => a.classList.toggle('on', a.getAttribute('href') === '#' + e.target.id))
+}), { rootMargin: '-40% 0px -55% 0px' })
+document.querySelectorAll('main section').forEach(s => io.observe(s))
+</script>
+</body>
+</html>
