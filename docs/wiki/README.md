@@ -66,6 +66,8 @@ Thay đổi chỉ áp dụng cho cuộc trò chuyện đang mở.
 
 ![Nút chọn model](images/03-model-picker.png)
 
+![Danh sách model OpenRouter](images/18-model-picker-openrouter.png)
+
 ### 3.2 Dán key cho Z.ai hoặc OpenRouter
 
 Vào **Admin → Cài đặt → Cấu hình**, dán key rồi bấm **Lưu**. Key có thể lấy tại [z.ai](https://z.ai) hoặc [OpenRouter](https://openrouter.ai/keys). Nếu chưa có key, app sẽ mở phần cấu hình khi bạn chọn model đó.
