@@ -135,6 +135,49 @@ Ví dụ:
 
 Trước khi **gửi, trả lời hoặc xoá** thư, agent sẽ yêu cầu bạn xác nhận. Khi agent đang làm việc, không bấm vào cửa sổ noVNC vì có thể làm gián đoạn thao tác. Mỗi lần chỉ nên có một cuộc trò chuyện dùng Gmail.
 
+### 5.4 Kiểm tra trình duyệt của agent có sống không
+
+Trình duyệt thật mà agent dùng tên là Playwright. Bạn nhìn thấy nó qua màn hình noVNC, và test chỉ mất 1 phút:
+
+**Bước 1 — Mở màn hình, bấm Connect.** Vào `http://127.0.0.1:6080/vnc`, bạn sẽ thấy màn hình như dưới, bấm nút **Connect** ở giữa.
+
+![Màn hình noVNC chờ bấm Connect](images/19-vnc-connect.png)
+
+**Bước 2 — Thấy cửa sổ Chrome là đạt.** Sau khi bấm Connect, màn hình hiện cửa sổ Chrome bên trong — ví dụ đang mở hộp thư Gmail (nội dung thư đã được che đi trong ảnh). Thấy được như vậy nghĩa là trình duyệt của agent đang sống.
+
+![Cửa sổ Chrome hiện trong noVNC](images/20-vnc-desktop.png)
+
+**Bước 3 — Nhờ agent làm một việc và nhìn nó chạy.** Trong chat, nhắn:
+
+> Mở hộp thư Gmail và cho biết có bao nhiêu thư chưa đọc. Chỉ đọc, không gửi hay xóa gì cả.
+
+Nhấn **Gửi** xong, bạn sẽ thấy từng diễn biến sau, theo đúng thứ tự:
+
+1. Cuối khung chat hiện **Đang suy nghĩ…** kèm nút **Dừng** — agent đang làm, đừng nhắn thêm.
+2. Mỗi thao tác hiện thành một dòng, ví dụ *“Đã dùng gmail_list”*. Bấm vào dòng đó để xem chi tiết agent đã làm gì.
+
+![Chat lúc agent đang làm: dòng thao tác, trạng thái, nút Dừng](images/21-agent-dang-lam.png)
+
+3. Cùng lúc, cửa sổ noVNC tự chuyển động theo từng thao tác của agent. Trong lúc đó đừng bấm vào cửa sổ noVNC vì cú bấm của bạn có thể làm gián đoạn agent. Mẹo: mở 2 cửa sổ cạnh nhau, một bên chat, một bên noVNC để vừa nhắn vừa xem.
+4. Làm xong, agent trả lời kết quả ngay trong chat:
+
+![Agent trả lời kết quả](images/22-agent-ket-qua.png)
+
+Trước khi **gửi, trả lời hoặc xoá** thư, agent không làm luôn mà hiện hộp chờ bạn **đồng ý** — cứ để ý cuối khung chat mỗi khi thấy agent đứng im.
+
+**Nếu không được:**
+
+- Mở `/vnc` mà thấy màn hình đen hoặc báo lỗi kết nối: service trình duyệt chưa lên. Chạy từ thư mục gốc của dự án:
+  ```sh
+  docker compose -f deploy/docker-compose.yml ps
+  ```
+  dòng `playwright-mcp` phải ở trạng thái `Up`. Nếu không, xem lỗi rồi khởi động lại:
+  ```sh
+  docker compose -f deploy/docker-compose.yml logs --tail=30 playwright-mcp
+  docker compose -f deploy/docker-compose.yml restart playwright-mcp
+  ```
+- Agent báo `browser service is unreachable`: app không nối được tới trình duyệt — cũng xử lý bằng 3 lệnh trên. Đăng nhập Gmail không mất khi restart vì phiên đăng nhập nằm trên volume `browser-profile`.
+
 ## 6. Tự động hoá với n8n
 
 Bạn có thể nhờ agent dựng workflow, ví dụ: mỗi sáng tóm tắt thư mới.

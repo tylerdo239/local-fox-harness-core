@@ -274,6 +274,37 @@ details p{margin:8px 0 2px;color:var(--muted)}
       <p class="note warn">Trong lúc agent đang làm, đừng bấm vào cửa sổ noVNC: cú bấm của bạn có thể làm gián đoạn agent. Mỗi lần chỉ nên có một cuộc trò chuyện dùng Gmail.</p>
     </div>
   </div>
+
+  <div class="step">
+    <div>
+      <h3><small>4</small>Mở màn hình, bấm Connect</h3>
+      <p>Vào <b>http://127.0.0.1:6080/vnc</b>, bạn sẽ thấy màn hình như bên phải. Bấm nút <b>Connect</b> ở giữa.</p>
+      <p class="note warn">Thấy màn hình đen hoặc báo lỗi kết nối là service trình duyệt chưa lên: chạy <code>docker compose -f deploy/docker-compose.yml ps</code> từ thư mục gốc của dự án, dòng <code>playwright-mcp</code> phải là <code>Up</code>.</p>
+    </div>
+    <img src="images/19-vnc-connect.png" alt="Màn hình noVNC chờ bấm Connect">
+  </div>
+
+  <div class="step">
+    <div>
+      <h3><small>5</small>Nhờ agent làm một việc và nhìn nó chạy</h3>
+      <p>Sau khi bấm Connect, màn hình hiện cửa sổ Chrome bên trong — ví dụ đang mở hộp thư Gmail (thư đã được che đi). Thấy như vậy là trình duyệt của agent đang sống.</p>
+      <p>Trong chat, nhắn agent một việc cần trình duyệt:</p>
+      <div class="say">Mở hộp thư Gmail và cho biết có bao nhiêu thư chưa đọc. Chỉ đọc, không gửi hay xóa gì cả.</div>
+      <p>Nhấn <b>Gửi</b> xong, bạn sẽ thấy từng diễn biến sau, theo đúng thứ tự:</p>
+      <ol>
+        <li>Cuối khung chat hiện <b>Đang suy nghĩ…</b> kèm nút <b>Dừng</b> — agent đang làm, đừng nhắn thêm.</li>
+        <li>Mỗi thao tác hiện thành một dòng, ví dụ <i>"Đã dùng gmail_list"</i>. Bấm vào dòng đó để xem chi tiết agent đã làm gì.</li>
+        <li>Cùng lúc, cửa sổ noVNC tự chuyển động theo từng thao tác của agent.</li>
+        <li>Làm xong, agent trả lời kết quả ngay trong chat.</li>
+      </ol>
+      <p>Mẹo: mở 2 cửa sổ cạnh nhau, một bên chat, một bên noVNC để vừa nhắn vừa xem. Trong lúc agent làm, đừng bấm vào cửa sổ noVNC.</p>
+      <p>Trước khi <b>gửi, trả lời hay xoá</b> thư, agent hiện hộp chờ bạn <b>đồng ý</b> — thấy agent đứng im thì kéo xuống cuối khung chat kiểm tra.</p>
+      <p class="note warn">Nếu agent báo <code>browser service is unreachable</code>: xem lỗi bằng <code>logs --tail=30 playwright-mcp</code> rồi <code>restart playwright-mcp</code> (đăng nhập Gmail không mất khi restart).</p>
+    </div>
+    <img src="images/20-vnc-desktop.png" alt="Cửa sổ Chrome hiện trong noVNC (thư đã làm mờ)">
+    <img src="images/21-agent-dang-lam.png" alt="Chat hiện dòng thao tác, trạng thái đang suy nghĩ và nút Dừng">
+    <img src="images/22-agent-ket-qua.png" alt="Agent trả lời kết quả đếm thư chưa đọc">
+  </div>
 </section>
 
 <!-- 6 -->
