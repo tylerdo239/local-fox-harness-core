@@ -139,7 +139,7 @@ rebuilding — see `docs/patch-cookbook.md`).
 `docs/patch-cookbook.md`'s Ví dụ 4) and `playwright-mcp` (a headed Chromium
 + noVNC container the `gmail_*` tools drive — its own `deploy/browser/
 Dockerfile`, a real extra build, not free). Gmail needs a **one-time manual
-Google sign-in**: open `http://127.0.0.1:6080/vnc.html` and log in by hand
+Google sign-in**: open `http://127.0.0.1:6080/vnc` and log in by hand
 in that window — the session persists on the `browser-profile` volume across
 restarts. Neither service blocks `core` from booting or working if you never
 touch them (`packages/tool/gmail-browser/src/index.ts` connects lazily and

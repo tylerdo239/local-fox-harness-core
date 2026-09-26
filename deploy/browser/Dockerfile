@@ -18,6 +18,9 @@ RUN mkdir -p /tmp/.X11-unix && chmod 1777 /tmp/.X11-unix
 # it is created, and the service runs as the host user, not as root.
 RUN mkdir -p /downloads /profile && chmod 1777 /downloads /profile
 COPY deploy/browser/entrypoint.sh /usr/local/bin/entrypoint.sh
+# Wrapper that serves noVNC at the extensionless URL /vnc (see the file
+# header for why a plain copy/subdirectory does not work).
+COPY deploy/browser/novnc-clean-url.py /usr/local/bin/novnc-clean-url.py
 # The compose service overrides this with the host user that owns
 # secrets/gmail — see docker-compose.yml.
 USER node

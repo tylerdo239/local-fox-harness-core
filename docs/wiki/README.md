@@ -10,7 +10,7 @@ Fox Harness là trợ lý AI chạy trên máy của bạn. Nó có thể trò c
 | Dịch vụ | Địa chỉ cục bộ |
 | --- | --- |
 | App chat | `http://127.0.0.1:3080` |
-| Trình duyệt Gmail của agent | `http://127.0.0.1:6080/vnc.html` |
+| Trình duyệt Gmail của agent | `http://127.0.0.1:6080/vnc` |
 | n8n | `http://127.0.0.1:5678` |
 
 ## 1. Bắt đầu
@@ -111,7 +111,7 @@ Agent dùng Gmail qua một trình duyệt thật và bạn có thể theo dõi 
 
 ### 5.1 Mở trình duyệt của agent
 
-Vào `http://127.0.0.1:6080/vnc.html` rồi bấm **Connect**.
+Vào `http://127.0.0.1:6080/vnc` rồi bấm **Connect**.
 
 ![noVNC](images/09-novnc-connect.png)
 

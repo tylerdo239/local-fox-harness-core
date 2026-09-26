@@ -66,7 +66,7 @@ services:
   playwright-mcp:
     # Upstream Playwright MCP plus a virtual screen and noVNC — see
     # browser/Dockerfile. Watch the agent work, or sign in to Gmail by hand,
-    # at http://127.0.0.1:6080/vnc.html; from a laptop, open a tunnel first:
+    # at http://127.0.0.1:6080/vnc; from a laptop, open a tunnel first:
     #   ssh -L 6080:127.0.0.1:6080 <server>
     build:
       context: ..

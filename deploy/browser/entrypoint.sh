@@ -27,6 +27,10 @@ done
 # SSH tunnel (docker-compose.yml). Anyone who opens that page can read and
 # send mail as the signed-in account.
 x11vnc -display "$DISPLAY" -forever -shared -nopw -rfbport 5900 -quiet -bg >/dev/null
-websockify --web=/usr/share/novnc 6080 localhost:5900 &
+# The viewer is served at the extensionless URL http://127.0.0.1:6080/vnc:
+# novnc-clean-url.py wraps stock websockify and rewrites /vnc to the real
+# vnc.html (a plain copy or subdirectory would break MIME types / relative
+# asset paths — see that file).
+python3 /usr/local/bin/novnc-clean-url.py &
 
 exec node /app/cli.js "$@"

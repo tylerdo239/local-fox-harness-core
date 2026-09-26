@@ -131,7 +131,7 @@ tài khoản Gmail của bạn.
 
 **Bắt buộc phải làm 1 lần**: đăng nhập Google bằng tay qua giao diện VNC:
 
-1. Mở `http://127.0.0.1:6080/vnc.html` trên trình duyệt.
+1. Mở `http://127.0.0.1:6080/vnc` trên trình duyệt.
 2. Đăng nhập Gmail như bình thường trong cửa sổ đó.
 3. Xong — phiên đăng nhập được lưu lại (volume `browser-profile`), sống sót qua mọi lần restart
    sau này, không cần đăng nhập lại trừ khi Google tự đăng xuất.
@@ -144,7 +144,7 @@ năng Gmail thì bỏ qua bước này hoàn toàn cũng không sao.
 ```sh
 ssh -L 6080:127.0.0.1:6080 <user>@<server>
 ```
-rồi mở `http://127.0.0.1:6080/vnc.html` như bình thường trên máy của bạn.
+rồi mở `http://127.0.0.1:6080/vnc` như bình thường trên máy của bạn.
 
 ## 8. Cập nhật lên bản mới
 
